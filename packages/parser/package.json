@@ -1,0 +1,29 @@
+{
+  "name": "markdown-parser",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^3.2.4",
+    "oxfmt": "^0.34.0",
+    "oxlint": "^1.49.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
