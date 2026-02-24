@@ -1,0 +1,106 @@
+export type ATXHeadingMatch = {
+  indent: string;
+  hashes: string;
+  spacesAfterHash: string;
+  content: string;
+  closingHashes: string;
+  trailingSpaces: string;
+  level: number;
+};
+
+export type ThematicBreakMatch = {
+  indent: string;
+  chars: string;
+};
+
+export type ListItemMatch = {
+  indent: string;
+  marker: string;
+  type: "bullet" | "ordered";
+};
+
+export const isBlankLine = (line: string): boolean => /^[ \t]*$/.test(line);
+
+export const matchATXHeading = (line: string): ATXHeadingMatch | null => {
+  // 0-3 spaces indent, then 1-6 #, then space or end of line
+  const match = line.match(/^( {0,3})(#{1,6})( +|$)(.*?)$/);
+  if (!match) return null;
+
+  const [, indent, hashes, spacesAfterHash, rest] = match;
+
+  // Parse closing hashes from rest
+  let content = rest;
+  let closingHashes = "";
+  let trailingSpaces = "";
+
+  // Check for trailing spaces first
+  const trailingMatch = content.match(/^(.*?)( +)$/);
+  if (trailingMatch) {
+    content = trailingMatch[1];
+    trailingSpaces = trailingMatch[2];
+  }
+
+  // Check for closing hashes (must be preceded by space in original content)
+  const closingMatch = content.match(/^(.*?) (#+)$/);
+  if (closingMatch) {
+    content = closingMatch[1];
+    closingHashes = closingMatch[2];
+  } else if (trailingSpaces && content.match(/^(.*?)(#+)$/)) {
+    // closing hashes with trailing spaces: "# Title #  "
+    // trailingSpaces was already extracted, now check content for closing hashes
+    const closingMatch2 = content.match(/^(.*?) (#+)$/);
+    if (closingMatch2) {
+      content = closingMatch2[1];
+      closingHashes = closingMatch2[2];
+    }
+  }
+
+  return {
+    indent,
+    hashes,
+    spacesAfterHash,
+    content,
+    closingHashes,
+    trailingSpaces,
+    level: hashes.length,
+  };
+};
+
+export const matchThematicBreak = (line: string): ThematicBreakMatch | null => {
+  const match = line.match(/^( {0,3})([-*_][-*_ \t]*)$/);
+  if (!match) return null;
+
+  const [, indent, chars] = match;
+
+  // All non-whitespace characters must be the same type, and at least 3
+  const charOnly = chars.replace(/[ \t]/g, "");
+  if (charOnly.length < 3) return null;
+  const first = charOnly[0];
+  if (!charOnly.split("").every((c) => c === first)) return null;
+
+  return { indent, chars };
+};
+
+export const matchListItemStart = (line: string): ListItemMatch | null => {
+  // Bullet list: 0-3 spaces, then [-+*], then 1+ space
+  const bulletMatch = line.match(/^( {0,3})([-+*] +)/);
+  if (bulletMatch) {
+    return {
+      indent: bulletMatch[1],
+      marker: bulletMatch[2],
+      type: "bullet",
+    };
+  }
+
+  // Ordered list: 0-3 spaces, then 1-9 digits, then [.)], then 1+ space
+  const orderedMatch = line.match(/^( {0,3})(\d{1,9}[.)] +)/);
+  if (orderedMatch) {
+    return {
+      indent: orderedMatch[1],
+      marker: orderedMatch[2],
+      type: "ordered",
+    };
+  }
+
+  return null;
+};
