@@ -42,6 +42,21 @@ describe("extractText", () => {
       const source = "1. first\n2. second";
       expect(roundTrip(source)).toBe(source);
     });
+
+    it("round-trips a loose unordered list (blank lines between items)", () => {
+      const source = "- first\n\n- second";
+      expect(roundTrip(source)).toBe(source);
+    });
+
+    it("round-trips a loose ordered list", () => {
+      const source = "1. alpha\n\n2. beta";
+      expect(roundTrip(source)).toBe(source);
+    });
+
+    it("round-trips a loose list with three items", () => {
+      const source = "- a\n\n- b\n\n- c";
+      expect(roundTrip(source)).toBe(source);
+    });
   });
 
   describe("inline formatting", () => {
@@ -76,15 +91,12 @@ describe("extractText", () => {
       expect(roundTrip(source)).toBe(source);
     });
 
-    it("extracts blockquote (recursive rendering strips > markers)", () => {
-      // blockquote children are rendered recursively; the "> " prefix is not
-      // preserved in the DOM, so extractText cannot reconstruct it.
-      expect(roundTrip("> quoted text")).toBe("quoted text");
+    it("extracts blockquote with > prefix preserved", () => {
+      expect(roundTrip("> quoted text")).toBe("> quoted text");
     });
 
     it("extracts blockquote with inline formatting", () => {
-      // inline elements inside blockquote are correctly rendered and extracted
-      expect(roundTrip("> **bold** text")).toBe("**bold** text");
+      expect(roundTrip("> **bold** text")).toBe("> **bold** text");
     });
   });
 
@@ -94,13 +106,10 @@ describe("extractText", () => {
       expect(roundTrip(source)).toBe(source);
     });
 
-    it("round-trips a complex document (blockquote > prefix not preserved)", () => {
+    it("round-trips a complex document with blockquote", () => {
       const source =
         "# Title\n\nSome *emphasized* and **strong** text.\n\n- item 1\n- item 2\n\n---\n\n> a quote";
-      // The "> " blockquote marker is stripped by recursive rendering
-      const expected =
-        "# Title\n\nSome *emphasized* and **strong** text.\n\n- item 1\n- item 2\n\n---\n\na quote";
-      expect(roundTrip(source)).toBe(expected);
+      expect(roundTrip(source)).toBe(source);
     });
   });
 
@@ -121,23 +130,30 @@ describe("extractText", () => {
     });
   });
 
-  describe("blank_line with user-typed content", () => {
-    it("extracts content from a blank_line block with user text", () => {
+  describe("block separator model", () => {
+    it("inserts a separator \\n between adjacent block siblings", () => {
       const container = document.createElement("div");
       container.innerHTML =
-        '<p data-block="paragraph">Hello</p><div data-block="blank_line">typed text</div>';
-      // "Hello" + "\n" (leaf block end) + "\n" (blank_line separator) + "typed text" + "\n" (leaf block end)
-      // Final trailing \n is removed by extractText
-      expect(extractText(container)).toBe("Hello\n\ntyped text");
+        '<p data-block="paragraph">Hello</p><p data-block="paragraph">World</p>';
+      // "Hello\n" (p end) + "\n" (separator) + "World\n" (p end)
+      // strip trailing \n → "Hello\n\nWorld"
+      expect(extractText(container)).toBe("Hello\n\nWorld");
     });
 
-    it("handles blank_line with nested child nodes", () => {
+    it("does not insert separator between li siblings (ul has withSeparator=false)", () => {
       const container = document.createElement("div");
       container.innerHTML =
-        '<div data-block="blank_line"><span>some</span> text</div>';
-      // "\n" (blank_line separator) + "some text" + "\n" (leaf block end)
-      // trailing \n is removed
-      expect(extractText(container)).toBe("\nsome text");
+        '<ul><li data-block="list_item">- a</li><li data-block="list_item">- b</li></ul>';
+      // "- a\n" + "- b\n" strip → "- a\n- b"
+      expect(extractText(container)).toBe("- a\n- b");
+    });
+
+    it("inserts separator between paragraphs inside blockquote", () => {
+      const container = document.createElement("div");
+      container.innerHTML =
+        '<blockquote data-block="block_quote">&gt; <p data-block="paragraph">A</p><p data-block="paragraph">B</p></blockquote>';
+      // "> " (text) + "A\n" + "\n" (sep) + "B\n" strip → "> A\n\nB"
+      expect(extractText(container)).toBe("> A\n\nB");
     });
   });
 
@@ -153,8 +169,9 @@ describe("extractText", () => {
     it("handles browser-generated div with only a <br> inside", () => {
       const container = document.createElement("div");
       container.innerHTML = "<p>Hello</p><div><br></div>";
-      // "Hello" + "\n" (p) + (br is placeholder, ignored) + "\n" (div)
-      // trailing \n removed
+      // No separator before div (plain div not block-level for separator purposes).
+      // "Hello\n" (p end) + (br=placeholder, nothing) + "\n" (div end)
+      // strip one trailing \n → "Hello\n"
       expect(extractText(container)).toBe("Hello\n");
     });
   });
@@ -172,20 +189,30 @@ describe("extractText", () => {
       expect(extractText(container)).toBe("\nafter");
     });
 
+    it("treats trailing cursor-target <p><br></p> as empty block", () => {
+      const container = document.createElement("div");
+      container.innerHTML =
+        '<p data-block="paragraph">Hello</p><p><br></p>';
+      // "Hello\n" (p end) + "\n" (sep) + (br=placeholder, no content) + "\n" (p end)
+      // join → "Hello\n\n\n", strip one trailing \n → "Hello\n\n"
+      expect(extractText(container)).toBe("Hello\n\n");
+    });
+
     it("returns false for <br> when parent has multiple children", () => {
       const container = document.createElement("div");
       container.innerHTML = '<p data-block="paragraph">text<br></p>';
-      // <br> in <p> but <p> has 2 children (text + br), so not a placeholder
+      // <br> in <p> has 2 children (text + br), so not a placeholder → \n from br
+      // "text" + "\n" (from br) + "\n" (p end) → "text\n\n" → strip one → "text\n"
       expect(extractText(container)).toBe("text\n");
     });
 
     it("treats <br> as placeholder when it is sole child of a <div>", () => {
       const container = document.createElement("div");
-      // <div> with a sole <br> child => placeholder => ignored
+      // <div> with a sole <br> child => placeholder => ignored for content
       container.innerHTML =
         '<p data-block="paragraph">Hello</p><div><br></div>';
-      // "Hello" + "\n" (p end) + (br placeholder, ignored) + "\n" (div end)
-      // trailing \n stripped
+      // No separator before div (plain div not block-level for separators).
+      // "Hello\n" (p end) + (br=placeholder) + "\n" (div end) → strip one → "Hello\n"
       expect(extractText(container)).toBe("Hello\n");
     });
   });

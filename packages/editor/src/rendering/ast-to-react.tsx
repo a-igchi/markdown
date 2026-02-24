@@ -16,7 +16,19 @@ import type {
 import type { ReactNode } from "react";
 
 export function astToReact(doc: Document, source: string): ReactNode[] {
-  return renderBlockNodes(doc.children, source, false);
+  const result: ReactNode[] = [];
+  for (let i = 0; i < doc.children.length; i++) {
+    const node = doc.children[i];
+    if (node.type === "blank_line") {
+      // Only render the trailing blank_line as a cursor target
+      if (i === doc.children.length - 1) {
+        result.push(<p key={`b${i}`}><br /></p>);
+      }
+      continue;
+    }
+    result.push(renderBlockNode(node, `b${i}`, source, false));
+  }
+  return result;
 }
 
 function renderBlockNodes(
@@ -25,8 +37,11 @@ function renderBlockNodes(
   tight: boolean,
 ): ReactNode[] {
   const result: ReactNode[] = [];
-  for (let i = 0; i < nodes.length; i++) {
-    result.push(renderBlockNode(nodes[i], `b${i}`, source, tight));
+  let keyIdx = 0;
+  for (const node of nodes) {
+    if (node.type === "blank_line") continue;
+    result.push(renderBlockNode(node, `b${keyIdx}`, source, tight));
+    keyIdx++;
   }
   return result;
 }
@@ -46,18 +61,14 @@ function renderBlockNode(
       return renderList(node, key, source);
     case "list_item":
       return renderListItem(node, key, source, tight);
-    case "blank_line":
-      return (
-        <div key={key} data-block="blank_line">
-          <br />
-        </div>
-      );
     case "thematic_break":
       return renderThematicBreak(node, key, source);
     case "code_block":
       return renderCodeBlock(node, key, source);
     case "block_quote":
       return renderBlockQuote(node, key, source);
+    case "blank_line":
+      return null;
   }
 }
 
@@ -113,7 +124,9 @@ function renderListItem(
   source: string,
   tight: boolean,
 ): ReactNode {
-  const prefix = node.marker + " ";
+  const markerEnd = node.sourceLocation.start.offset + node.marker.length;
+  const prefix =
+    source[markerEnd] === " " ? node.marker + " " : node.marker;
   return (
     <li key={key} data-block="list_item">
       {prefix}
@@ -175,6 +188,7 @@ function renderBlockQuote(
 
   return (
     <blockquote key={key} data-block="block_quote">
+      {"> "}
       {renderBlockNodes(node.children, subSource, false)}
     </blockquote>
   );

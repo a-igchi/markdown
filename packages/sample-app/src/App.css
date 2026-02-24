@@ -63,6 +63,10 @@ body {
   list-style: none;
 }
 
+.editor li > p {
+  margin: 0.5em 0;
+}
+
 .editor em {
   font-style: italic;
 }

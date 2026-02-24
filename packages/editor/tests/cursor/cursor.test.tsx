@@ -69,11 +69,11 @@ describe("cursor save/restore", () => {
 
     it("returns correct offset across blocks with blank line", () => {
       const el = renderIntoContainer("# Hi\n\nWorld");
-      // Structure: <h1># Hi</h1><div blank_line /><p>World</p>
+      // Structure: <h1># Hi</h1><p>World</p> (no blank_line div)
       const p = el.querySelector("p")!;
       const textNode = p.firstChild!;
       setCursorAt(textNode, 2); // cursor after "Wo"
-      // Offset = "# Hi" (4) + "\n" (trailing) + "\n" (blank_line) + "Wo" (2) = 8
+      // Offset = "# Hi" (4) + "\n" (h1 end) + "\n" (separator) + "Wo" (2) = 8
       expect(saveCursorAsOffset(el)).toBe(8);
     });
   });
@@ -102,7 +102,8 @@ describe("cursor save/restore", () => {
 
     it("restores cursor in second block", () => {
       const el = renderIntoContainer("# Hi\n\nWorld");
-      restoreCursorFromOffset(el, 8); // 2 chars into "World"
+      // offset 8 = "# Hi" (4) + "\n" (h1 end) + "\n" (separator) + "Wo" (2)
+      restoreCursorFromOffset(el, 8);
       const offset = saveCursorAsOffset(el);
       expect(offset).toBe(8);
     });
@@ -111,7 +112,11 @@ describe("cursor save/restore", () => {
       const source = "# Title\n\nParagraph\n\n- item1\n- item2";
       const el = renderIntoContainer(source);
 
-      for (const pos of [0, 2, 7, 8, 9, 17, 18, 19, 25, 33]) {
+      // Positions 8 and 19 are separator positions (blank-line \n between blocks).
+      // They have no distinct DOM node, so restoring them places the cursor at
+      // the start of the next block, which saves back as the offset AFTER the
+      // separator (+1). These positions intentionally do not round-trip.
+      for (const pos of [0, 2, 7, 9, 17, 18, 25, 33]) {
         if (pos > source.length) continue;
         restoreCursorFromOffset(el, pos);
         const restored = saveCursorAsOffset(el);
@@ -120,34 +125,50 @@ describe("cursor save/restore", () => {
     });
   });
 
-  describe("blank_line with user-typed content", () => {
-    it("saves cursor offset in a blank_line block that has user content", () => {
+  describe("block separator model", () => {
+    it("saves cursor offset accounting for separator between blocks", () => {
       const el = document.createElement("div");
       el.innerHTML =
-        '<p data-block="paragraph">Hello</p><div data-block="blank_line">typed</div>';
+        '<p data-block="paragraph">Hello</p><p data-block="paragraph">World</p>';
       document.body.appendChild(el);
 
-      // Place cursor inside the text node of the blank_line block
-      const blankLine = el.querySelector('[data-block="blank_line"]')!;
-      const textNode = blankLine.firstChild!;
-      setCursorAt(textNode, 3); // "typ|ed"
+      // Place cursor at start of "World"
+      const ps = el.querySelectorAll("p");
+      const textNode = ps[1].firstChild!;
+      setCursorAt(textNode, 0);
 
-      // Offset = "Hello" (5) + "\n" (leaf end) + "\n" (blank_line sep) + "typ" (3) = 10
-      expect(saveCursorAsOffset(el)).toBe(10);
+      // Offset = "Hello" (5) + "\n" (p end) + "\n" (separator) = 7
+      expect(saveCursorAsOffset(el)).toBe(7);
 
       document.body.removeChild(el);
     });
 
-    it("restores cursor in a blank_line block that has user content", () => {
+    it("restores cursor past the separator between blocks", () => {
       const el = document.createElement("div");
       el.innerHTML =
-        '<p data-block="paragraph">Hello</p><div data-block="blank_line">typed</div>';
+        '<p data-block="paragraph">Hello</p><p data-block="paragraph">World</p>';
       document.body.appendChild(el);
 
-      // Restore to offset 10 => 3 chars into "typed"
-      restoreCursorFromOffset(el, 10);
+      restoreCursorFromOffset(el, 7);
       const offset = saveCursorAsOffset(el);
-      expect(offset).toBe(10);
+      expect(offset).toBe(7);
+
+      document.body.removeChild(el);
+    });
+
+    it("separator positions collapse into start of next block (offset+1)", () => {
+      const el = document.createElement("div");
+      el.innerHTML =
+        '<p data-block="paragraph">Hi</p><p data-block="paragraph">End</p>';
+      document.body.appendChild(el);
+
+      // "Hi\n\nEnd": offset 3 = the separator \n (virtual, no DOM node).
+      // Restoring offset 3 places cursor at {p2, offset:0} = start of second p.
+      // Saving from that DOM position returns 4 (= 2+"Hi" + 1 p_end + 1 sep = 4).
+      // Separator positions do not round-trip; they collapse into the block start.
+      restoreCursorFromOffset(el, 3);
+      const offset = saveCursorAsOffset(el);
+      expect(offset).toBe(4);
 
       document.body.removeChild(el);
     });
@@ -261,12 +282,13 @@ describe("cursor save/restore", () => {
         '<p data-block="paragraph">Hello</p><p data-block="paragraph">World</p>';
       document.body.appendChild(el);
 
-      // Set cursor on container at offset = childNodes.length (2, after all children)
-      // resolvedNode = last child = second <p>, resolvedOffset = p2.childNodes.length = 1
-      // walkDom: "Hello" (5) + leafEnd(p1) = 6, "World" (5) + leafEnd(p2)
-      // In onLeafBlockEnd(p2): el === resolvedNode (second <p>) => found, offset = 11
+      // Container (div) is not a leaf block → drills into last child:
+      // resolvedNode = p2, resolvedOffset = p2.childNodes.length = 1.
+      // Walk: "Hello"(5) + leafEnd(p1)=6 + sep(1)=7 + "World"(5)=12.
+      // onLeafBlockEnd(p2): el === resolvedNode => found, offset = 12.
+      // "Hello\n\nWorld" = 12 chars; cursor at end = offset 12.
       setCursorAt(el, el.childNodes.length);
-      expect(saveCursorAsOffset(el)).toBe(11);
+      expect(saveCursorAsOffset(el)).toBe(12);
 
       document.body.removeChild(el);
     });
@@ -297,13 +319,12 @@ describe("cursor save/restore", () => {
         '<p data-block="paragraph">A</p><div data-block="custom">B</div>';
       document.body.appendChild(el);
 
-      // Set cursor on the div[data-block="custom"] at offset = childNodes.length
-      // resolvedNode = last child = text node "B", resolvedOffset = 1
-      // walkDom: "A" (1) + leafEnd(p) = 2. "B" (1): node === resolvedNode,
-      // offset += 1 = 3, found.
+      // customDiv is a leaf block → don't drill → resolvedNode=customDiv, resolvedOffset=1.
+      // Walk: "A"(1) + leafEnd(p)=2 + sep(1)=3 + "B"(1)=4 + leafEnd(customDiv): found → 4.
+      // "A\n\nB" = 4 chars; cursor at end of customDiv = offset 4.
       const customBlock = el.querySelector('[data-block="custom"]')!;
       setCursorAt(customBlock, customBlock.childNodes.length);
-      expect(saveCursorAsOffset(el)).toBe(3);
+      expect(saveCursorAsOffset(el)).toBe(4);
 
       document.body.removeChild(el);
     });
@@ -364,42 +385,23 @@ describe("cursor save/restore", () => {
     });
   });
 
-  describe("blank_line onLeafBlockEnd after walking children", () => {
-    it("restores cursor to the leaf block end position of a blank_line with content", () => {
-      const el = document.createElement("div");
-      // "Hello" (5) + "\n" (p end) + "\n" (blank_line sep) + "ab" (2) + "\n" (blank_line leafEnd) + "End" (3) + "\n" (p end)
-      el.innerHTML =
-        '<p data-block="paragraph">Hello</p><div data-block="blank_line">ab</div><p data-block="paragraph">End</p>';
-      document.body.appendChild(el);
-
-      // Offset 9 = after "Hello\n" (6) + "\n" (blank_line sep) (7) + "ab" (9)
-      // onLeafBlockEnd of blank_line fires at offset 9, remaining should be 0
-      // => result = {node: blankLine, offset: blankLine.childNodes.length}
-      restoreCursorFromOffset(el, 9);
-      const offset = saveCursorAsOffset(el);
-      expect(offset).toBe(9);
-
-      document.body.removeChild(el);
-    });
-
-    it("walks through blank_line with content when cursor is in a later block", () => {
+  describe("separator between three blocks", () => {
+    it("round-trips cursor through a middle block", () => {
       const el = document.createElement("div");
       el.innerHTML =
-        '<p data-block="paragraph">Hi</p><div data-block="blank_line">XY</div><p data-block="paragraph">End</p>';
+        '<p data-block="paragraph">Hi</p><p data-block="paragraph">Mid</p><p data-block="paragraph">End</p>';
       document.body.appendChild(el);
 
-      // Set cursor in "End" text (last paragraph)
+      // Offset layout:
+      // "Hi" (2) + "\n" (p_end) + "\n" (sep) + "Mid" (3) + "\n" (p_end) + "\n" (sep) + "End" (3) + "\n" (p_end)
+      // Cursor 1 char into "End" = 2+1+1+3+1+1+1 = 10
       const ps = el.querySelectorAll("p");
-      const lastP = ps[ps.length - 1];
-      const textNode = lastP.firstChild!;
+      const textNode = ps[2].firstChild!;
       setCursorAt(textNode, 1); // "E|nd"
+      expect(saveCursorAsOffset(el)).toBe(10);
 
-      // Walk: "Hi" (2) + leafEnd(p1) = 3
-      // blank_line with content: onBlankLine (not matched) offset += 1 = 4
-      // Walk children: "XY" (2) offset = 6, not matched
-      // onLeafBlockEnd(blankLine) on line 52: not found, offset += 1 = 7
-      // "End" text: "E" at textNode matches resolvedNode => offset = 7 + 1 = 8
-      expect(saveCursorAsOffset(el)).toBe(8);
+      restoreCursorFromOffset(el, 10);
+      expect(saveCursorAsOffset(el)).toBe(10);
 
       document.body.removeChild(el);
     });
@@ -453,8 +455,8 @@ describe("cursor save/restore", () => {
       const textNode = p.firstChild!;
       setCursorAt(textNode, 2);
 
-      // "item" (4) + "\n" (li end) + "Af" (2) = 7
-      expect(saveCursorAsOffset(el)).toBe(7);
+      // "item"(4) + "\n"(li_end) + "\n"(ul→p separator) + "Af"(2) = 8
+      expect(saveCursorAsOffset(el)).toBe(8);
 
       document.body.removeChild(el);
     });
@@ -471,6 +473,53 @@ describe("cursor save/restore", () => {
       expect(offset).toBe(9);
 
       document.body.removeChild(el);
+    });
+
+    it("drills into container block when cursor is at element level after ul", () => {
+      const el = document.createElement("div");
+      el.innerHTML =
+        '<ul><li data-block="list_item">- first item</li></ul>';
+      document.body.appendChild(el);
+
+      // Simulate clearAndType: cursor at end of container div (after all children)
+      // range.selectNodeContents(el).collapse(false) → targetNode=el, targetOffset=1
+      // Without drilling, resolvedNode would be <ul> which walker can't match.
+      // With drilling, resolvedNode should be <li>, and walker's onLeafBlockEnd matches.
+      setCursorAt(el, el.childNodes.length);
+
+      // "- first item" (12) → end of li
+      expect(saveCursorAsOffset(el)).toBe(12);
+
+      document.body.removeChild(el);
+    });
+
+    it("drills into nested container blocks (ul > li when cursor at el level)", () => {
+      const el = document.createElement("div");
+      el.innerHTML =
+        '<ul><li data-block="list_item">- a</li><li data-block="list_item">- b</li></ul>';
+      document.body.appendChild(el);
+
+      // Cursor at end of container
+      setCursorAt(el, el.childNodes.length);
+
+      // "- a" (3) + li_end "\n" (1) + "- b" (3) → end of second li = 7
+      expect(saveCursorAsOffset(el)).toBe(7);
+
+      document.body.removeChild(el);
+    });
+  });
+
+  describe("loose list cursor round-trips", () => {
+    it("round-trips cursor in a loose list", () => {
+      const source = "- first\n\n- second";
+      const el = renderIntoContainer(source);
+
+      for (const pos of [0, 2, 7, 8, 9, 16]) {
+        if (pos > source.length) continue;
+        restoreCursorFromOffset(el, pos);
+        const restored = saveCursorAsOffset(el);
+        expect(restored).toBe(pos);
+      }
     });
   });
 

@@ -21,7 +21,9 @@ console.log("hello");
 Click [here](https://example.com) to visit a link.`;
 
 function App() {
-  const [value, setValue] = useState(INITIAL_MARKDOWN);
+  // Allow e2e tests to supply initial markdown via ?md= URL parameter.
+  const urlMd = new URLSearchParams(window.location.search).get("md");
+  const [value, setValue] = useState(urlMd ?? INITIAL_MARKDOWN);
 
   return (
     <div className="app">

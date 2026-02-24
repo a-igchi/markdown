@@ -200,7 +200,7 @@ describe("astToReact", () => {
       expect(bq).not.toBeNull();
       // blockquote recursively renders children, so a <p> appears inside
       expect(bq!.querySelector("p")).not.toBeNull();
-      expect(bq!.textContent).toBe("quoted text");
+      expect(bq!.textContent).toBe("> quoted text");
     });
 
     it("renders inline emphasis inside blockquote", () => {
@@ -231,10 +231,20 @@ describe("astToReact", () => {
   });
 
   describe("blank lines", () => {
-    it("renders blank line as an empty block", () => {
+    it("skips non-trailing blank_line nodes (no blank_line div emitted)", () => {
       const el = renderMarkdown("# Hello\n\nWorld");
       const blankLines = el.querySelectorAll("[data-block='blank_line']");
-      expect(blankLines.length).toBe(1);
+      expect(blankLines.length).toBe(0);
+    });
+
+    it("renders a trailing blank_line as <p><br></p>", () => {
+      // "Hello\n\n" — the trailing blank_line is the last child of the document
+      const el = renderMarkdown("Hello\n\n");
+      const ps = el.querySelectorAll("p");
+      // One p for "Hello", one empty p for the trailing blank_line cursor target
+      expect(ps.length).toBe(2);
+      const lastP = ps[ps.length - 1];
+      expect(lastP.querySelector("br")).not.toBeNull();
     });
   });
 
@@ -284,6 +294,29 @@ describe("astToReact", () => {
       expect(lis.length).toBe(2);
       expect(lis[0].textContent).toBe("- alpha");
       expect(lis[1].textContent).toBe("- beta");
+    });
+  });
+
+  describe("space preservation (bug 2 and bug 3)", () => {
+    // Spaces are preserved in the DOM text nodes as-is; the editor applies
+    // white-space: pre-wrap CSS so the browser does not collapse them visually.
+
+    it("bug2: multiple consecutive spaces are preserved in DOM text content", () => {
+      const el = renderMarkdown("a   b");
+      const p = el.querySelector("p")!;
+      expect(p.textContent).toBe("a   b");
+    });
+
+    it("bug3: trailing space in a block is preserved in DOM text content", () => {
+      const el = renderMarkdown("a ");
+      const p = el.querySelector("p")!;
+      expect(p.textContent).toBe("a ");
+    });
+
+    it("bug2: multiple spaces in heading are preserved in DOM text content", () => {
+      const el = renderMarkdown("# Hello  World");
+      const h1 = el.querySelector("h1")!;
+      expect(h1.textContent).toBe("# Hello  World");
     });
   });
 
