@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
-import { parse, getText } from "parser-cst";
+import { parse, getText } from "../../parser/dist/index.js";
 import { cstToReact } from "../src/rendering/cst-to-react.js";
 import { extractText } from "../src/text-extraction/extract-text.js";
 import { Editor } from "../src/index.js";

@@ -8,47 +8,30 @@
  * Convention:
  * - Leaf block elements (h1-h6, p, li, pre, div[data-block]) contribute
  *   their text content followed by a trailing \n.
- * - Container blocks (ul, ol) recurse into children without separators.
- * - blockquote recurses with inter-block separators.
- * - Adjacent block-level siblings at the root level and inside blockquotes
- *   get a \n separator inserted between them.
+ * - Container blocks (ul, ol, blockquote) recurse into children.
+ * - blank_line blocks contribute a single \n (producing an empty line
+ *   when combined with the preceding block's trailing \n).
+ * - If a blank_line block has user-typed content (from typing into the
+ *   blank line after pressing Enter), it produces \n + content + \n.
  * - <br> elements are ignored when they are the sole child of a block
  *   (placeholder). Otherwise they produce \n.
  */
 export function extractText(container: HTMLElement): string {
   const parts: string[] = [];
-  walkChildren(container, parts, true);
-  let text = parts.join("");
-  text = text.replace(/\n$/, ""); // remove exactly one trailing newline
-  return text;
-}
-
-function walkChildren(parent: HTMLElement, parts: string[], withSeparator: boolean): void {
-  let prevWasBlock = false;
-  for (const child of parent.childNodes) {
-    if (
-      withSeparator &&
-      prevWasBlock &&
-      child.nodeType === Node.ELEMENT_NODE &&
-      isBlockLevel((child as HTMLElement).tagName.toLowerCase(), child as HTMLElement)
-    ) {
-      parts.push("\n");
-    }
+  for (const child of container.childNodes) {
     extractNode(child, parts);
-    if (child.nodeType === Node.ELEMENT_NODE) {
-      const tag = (child as HTMLElement).tagName.toLowerCase();
-      prevWasBlock = isBlockLevel(tag, child as HTMLElement);
-    } else {
-      prevWasBlock = false;
-    }
   }
+  let text = parts.join("");
+  // Remove trailing newline (structural, from the last leaf block)
+  if (text.endsWith("\n")) {
+    text = text.slice(0, -1);
+  }
+  return text;
 }
 
 function extractNode(node: Node, parts: string[]): void {
   if (node.nodeType === Node.TEXT_NODE) {
-    // Replace browser-inserted U+00A0 (non-breaking space) with regular
-    // space so the extracted markdown never contains literal &nbsp;.
-    parts.push((node.textContent ?? "").replace(/\u00A0/g, " "));
+    parts.push(node.textContent ?? "");
     return;
   }
 
@@ -64,13 +47,28 @@ function extractNode(node: Node, parts: string[]): void {
     return;
   }
 
-  // Container blocks — recurse with or without inter-block separators
-  if (tag === "blockquote") {
-    walkChildren(el, parts, true);
+  // Blank line block
+  if (el.dataset.block === "blank_line") {
+    const textContent = el.textContent ?? "";
+    if (textContent.length > 0) {
+      // User has typed content into this blank line block.
+      // Emit: blank line separator + content + leaf block end
+      parts.push("\n");
+      for (const child of el.childNodes) {
+        extractNode(child, parts);
+      }
+      parts.push("\n");
+    } else {
+      parts.push("\n");
+    }
     return;
   }
-  if (tag === "ul" || tag === "ol") {
-    walkChildren(el, parts, false);
+
+  // Container blocks (ul, ol, blockquote, li without data-block) — just recurse
+  if (tag === "ul" || tag === "ol" || tag === "blockquote" || (tag === "li" && !el.dataset.block)) {
+    for (const child of el.childNodes) {
+      extractNode(child, parts);
+    }
     return;
   }
 
@@ -79,9 +77,7 @@ function extractNode(node: Node, parts: string[]): void {
     for (const child of el.childNodes) {
       extractNode(child, parts);
     }
-    if (!shouldSuppressTrailingNewline(tag, el)) {
-      parts.push("\n");
-    }
+    parts.push("\n");
     return;
   }
 
@@ -104,54 +100,13 @@ function isLeafBlock(tag: string, el: HTMLElement): boolean {
   return (
     /^h[1-6]$/.test(tag) ||
     tag === "p" ||
-    tag === "li" ||
     tag === "pre" ||
-    (tag === "div" && el.dataset.block !== undefined)
+    (tag === "div" && el.dataset.block !== undefined) ||
+    (tag === "li" && el.dataset.block !== undefined)
   );
 }
 
-function isBlockLevel(tag: string, el: HTMLElement): boolean {
-  // Plain divs (no data-block) are browser-generated blocks; they should NOT
-  // get a separator inserted before them since they represent a single line
-  // break, not a blank-line paragraph break.
-  if (tag === "div") return el.dataset.block !== undefined;
-  return (
-    /^h[1-6]$/.test(tag) ||
-    tag === "p" ||
-    tag === "li" ||
-    tag === "pre" ||
-    tag === "ul" ||
-    tag === "ol" ||
-    tag === "blockquote"
-  );
-}
-
-/**
- * Suppress the trailing \n for a leaf block in specific nesting scenarios
- * to avoid producing extra newlines in the extracted text:
- *
- * A <p> that is the last element child of the last <li>: the <li>'s own
- * trailing \n already provides the line break. Only suppress for the
- * terminal list item (no nextElementSibling on the <li>).
- */
-function shouldSuppressTrailingNewline(tag: string, el: HTMLElement): boolean {
-  if (tag === "p") {
-    const parent = el.parentElement;
-    if (
-      parent &&
-      parent.tagName.toLowerCase() === "li" &&
-      !el.nextElementSibling
-    ) {
-      return !parent.nextElementSibling; // suppress only for last li
-    }
-  }
-  return false;
-}
-
-/**
- * A <br> is a placeholder (and should not contribute a \n) when:
- * - It is the sole child of a block-level element.
- */
+/** A <br> is a placeholder if it's the sole child of a block-level element. */
 function isPlaceholderBr(br: HTMLElement): boolean {
   const parent = br.parentElement;
   if (!parent) return false;

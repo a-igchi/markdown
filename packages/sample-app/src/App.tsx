@@ -1,33 +1,29 @@
 import { useState } from "react";
-import { Editor } from "markdown-editor";
+import { Editor } from "editor-cst";
 import "./App.css";
 
 const INITIAL_MARKDOWN = `# Hello World
 
-This is a **markdown** editor with *WYSIWYG* rendering.
+This is a markdown editor with CST-based rendering.
 
 - Item one
 - Item two
 - Item three
 
-> This is a blockquote
-
-\`\`\`js
-console.log("hello");
-\`\`\`
+1. First
+2. Second
+3. Third
 
 ---
 
-Click [here](https://example.com) to visit a link.`;
+Another paragraph here.`;
 
 function App() {
-  // Allow e2e tests to supply initial markdown via ?md= URL parameter.
-  const urlMd = new URLSearchParams(window.location.search).get("md");
-  const [value, setValue] = useState(urlMd ?? INITIAL_MARKDOWN);
+  const [value, setValue] = useState(INITIAL_MARKDOWN);
 
   return (
     <div className="app">
-      <h1 className="app-title">Markdown WYSIWYG Editor</h1>
+      <h1 className="app-title">Markdown WYSIWYG Editor (CST)</h1>
       <div className="editor-container">
         <Editor value={value} onChange={setValue} className="editor" />
       </div>

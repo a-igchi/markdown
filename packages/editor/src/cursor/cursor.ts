@@ -16,130 +16,88 @@ interface WalkCallbacks {
   onText(node: Text, text: string): boolean;
   /** Called after a leaf block element's children have been walked. Return true to stop. */
   onLeafBlockEnd(el: HTMLElement): boolean;
-  /** Called for the virtual \n separator inserted between adjacent block siblings. Return true to stop. */
-  onBlockSeparator(nextEl: HTMLElement): boolean;
+  /** Called for a blank_line element (empty). Return true to stop. */
+  onBlankLine(el: HTMLElement): boolean;
 }
 
 function walkDom(container: HTMLElement, callbacks: WalkCallbacks): void {
-  walkContainerChildren(container, callbacks, true);
-}
-
-function walkContainerChildren(
-  parent: HTMLElement,
-  callbacks: WalkCallbacks,
-  withSep: boolean,
-): boolean {
-  let prevWasBlock = false;
-  for (const child of parent.childNodes) {
-    if (
-      withSep &&
-      prevWasBlock &&
-      child.nodeType === Node.ELEMENT_NODE &&
-      isBlockLevel((child as HTMLElement).tagName.toLowerCase(), child as HTMLElement)
-    ) {
-      if (callbacks.onBlockSeparator(child as HTMLElement)) return true;
+  function walk(node: Node): boolean {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return callbacks.onText(node as Text, node.textContent ?? "");
     }
-    if (walkNode(child, callbacks)) return true;
-    if (child.nodeType === Node.ELEMENT_NODE) {
-      const tag = (child as HTMLElement).tagName.toLowerCase();
-      prevWasBlock = isBlockLevel(tag, child as HTMLElement);
-    } else {
-      prevWasBlock = false;
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const el = node as HTMLElement;
+    const tag = el.tagName.toLowerCase();
+
+    if (tag === "br") {
+      if (isPlaceholderBr(el)) return false;
+      // Non-placeholder <br> counts as \n — but for cursor purposes we skip
+      // (the \n is counted by the text extraction but has no cursor target)
+      return false;
     }
-  }
-  return false;
-}
 
-function walkNode(node: Node, callbacks: WalkCallbacks): boolean {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return callbacks.onText(node as Text, node.textContent ?? "");
-  }
+    if (el.dataset.block === "blank_line") {
+      const hasContent = (el.textContent ?? "").length > 0;
+      if (hasContent) {
+        // Blank line with user-typed content:
+        // Count the \n separator (same as extractText's "\n" push)
+        if (callbacks.onBlankLine(el)) return true;
+        // Walk into children (the typed text)
+        for (const child of el.childNodes) {
+          if (walk(child)) return true;
+        }
+        // Count the leaf block end \n
+        return callbacks.onLeafBlockEnd(el);
+      }
+      return callbacks.onBlankLine(el);
+    }
 
-  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+    // Container blocks — recurse
+    if (tag === "ul" || tag === "ol" || tag === "blockquote" || (tag === "li" && !el.dataset.block)) {
+      for (const child of el.childNodes) {
+        if (walk(child)) return true;
+      }
+      return false;
+    }
 
-  const el = node as HTMLElement;
-  const tag = el.tagName.toLowerCase();
+    // Leaf blocks
+    if (isLeafBlock(tag, el)) {
+      for (const child of el.childNodes) {
+        if (walk(child)) return true;
+      }
+      return callbacks.onLeafBlockEnd(el);
+    }
 
-  if (tag === "br") {
-    if (isPlaceholderBr(el)) return false;
-    // Non-placeholder <br> counts as \n in extractText but has no cursor
-    // target — skip for cursor purposes
+    // Browser-generated div (e.g., from Enter key)
+    if (tag === "div") {
+      for (const child of el.childNodes) {
+        if (walk(child)) return true;
+      }
+      return callbacks.onLeafBlockEnd(el);
+    }
+
+    // Inline elements — recurse
+    for (const child of el.childNodes) {
+      if (walk(child)) return true;
+    }
     return false;
   }
 
-  // Container blocks — recurse with or without separators
-  if (tag === "blockquote") {
-    return walkContainerChildren(el, callbacks, true);
+  for (const child of container.childNodes) {
+    if (walk(child)) break;
   }
-  if (tag === "ul" || tag === "ol") {
-    return walkContainerChildren(el, callbacks, false);
-  }
-
-  // Leaf blocks
-  if (isLeafBlock(tag, el)) {
-    for (const child of el.childNodes) {
-      if (walkNode(child, callbacks)) return true;
-    }
-    if (shouldSuppressTrailingNewline(tag, el)) {
-      return false;
-    }
-    return callbacks.onLeafBlockEnd(el);
-  }
-
-  // Browser-generated div (e.g., from Enter key)
-  if (tag === "div") {
-    for (const child of el.childNodes) {
-      if (walkNode(child, callbacks)) return true;
-    }
-    return callbacks.onLeafBlockEnd(el);
-  }
-
-  // Inline elements — recurse
-  for (const child of el.childNodes) {
-    if (walkNode(child, callbacks)) return true;
-  }
-  return false;
 }
 
 function isLeafBlock(tag: string, el: HTMLElement): boolean {
   return (
     /^h[1-6]$/.test(tag) ||
     tag === "p" ||
-    tag === "li" ||
     tag === "pre" ||
-    (tag === "div" && el.dataset.block !== undefined)
+    (tag === "div" && el.dataset.block !== undefined) ||
+    (tag === "li" && el.dataset.block !== undefined)
   );
-}
-
-function isBlockLevel(tag: string, el: HTMLElement): boolean {
-  if (tag === "div") return el.dataset.block !== undefined;
-  return (
-    /^h[1-6]$/.test(tag) ||
-    tag === "p" ||
-    tag === "li" ||
-    tag === "pre" ||
-    tag === "ul" ||
-    tag === "ol" ||
-    tag === "blockquote"
-  );
-}
-
-/**
- * Suppress the trailing \n for a leaf block in specific nesting scenarios.
- * Must match the same logic in extract-text.ts.
- */
-function shouldSuppressTrailingNewline(tag: string, el: HTMLElement): boolean {
-  if (tag === "p") {
-    const parent = el.parentElement;
-    if (
-      parent &&
-      parent.tagName.toLowerCase() === "li" &&
-      !el.nextElementSibling
-    ) {
-      return !parent.nextElementSibling; // suppress only for last li
-    }
-  }
-  return false;
 }
 
 function isPlaceholderBr(br: HTMLElement): boolean {
@@ -172,50 +130,13 @@ export function saveCursorAsOffset(container: HTMLElement): number | null {
   let resolvedNode: Node = targetNode;
   let resolvedOffset: number = targetOffset;
   if (targetNode.nodeType === Node.ELEMENT_NODE) {
-    const targetEl = targetNode as HTMLElement;
-    const targetTag = targetEl.tagName.toLowerCase();
     const children = targetNode.childNodes;
     if (targetOffset < children.length) {
       // Before the child at targetOffset — position at start of that child
       resolvedNode = children[targetOffset];
       resolvedOffset = 0;
-    } else if (children.length > 0 && !isLeafBlock(targetTag, targetEl)) {
-      // After all children of a CONTAINER (not a leaf block).
-      // For leaf blocks (li, p, h1, pre, div[data-block]), keep resolvedNode as
-      // the element itself so that onLeafBlockEnd can match it correctly and
-      // account for the element's own trailing \n.
-      const last = children[children.length - 1];
-      resolvedNode = last;
-      resolvedOffset =
-        last.nodeType === Node.TEXT_NODE
-          ? (last.textContent ?? "").length
-          : last.childNodes.length;
-    }
-    // else: leaf block at end → resolvedNode = targetEl, resolvedOffset = targetOffset
-  }
-
-  // If resolvedNode is a placeholder <br>, treat cursor as at the parent element
-  if (
-    resolvedNode.nodeType === Node.ELEMENT_NODE &&
-    (resolvedNode as HTMLElement).tagName.toLowerCase() === "br" &&
-    isPlaceholderBr(resolvedNode as HTMLElement)
-  ) {
-    resolvedNode = resolvedNode.parentElement ?? resolvedNode;
-    resolvedOffset = 0;
-  }
-
-  // Drill into container blocks: the walker recurses into them without
-  // ever comparing against the container element, so we must resolve to
-  // a descendant that the walker will match (text node or leaf block).
-  while (resolvedNode.nodeType === Node.ELEMENT_NODE) {
-    const tag = (resolvedNode as HTMLElement).tagName.toLowerCase();
-    if (tag !== "ul" && tag !== "ol" && tag !== "blockquote") break;
-    const children = resolvedNode.childNodes;
-    if (children.length === 0) break;
-    if (resolvedOffset < children.length) {
-      resolvedNode = children[resolvedOffset];
-      resolvedOffset = 0;
-    } else {
+    } else if (children.length > 0) {
+      // After all children — position at end of last child
       const last = children[children.length - 1];
       resolvedNode = last;
       resolvedOffset =
@@ -247,18 +168,12 @@ export function saveCursorAsOffset(container: HTMLElement): number | null {
       offset += 1; // trailing \n
       return false;
     },
-    onBlockSeparator(nextEl) {
-      // Match as cursor target only when cursor is at the START of nextEl
-      // (resolvedOffset=0 means "before any content of the next block").
-      // If resolvedOffset>0, the cursor is inside/after nextEl and will be
-      // matched by onText or onLeafBlockEnd instead.
-      // Note: targetNode is not checked here because in the separator model
-      // there are no real DOM nodes that represent separators.
-      if (nextEl === resolvedNode && resolvedOffset === 0) {
+    onBlankLine(el) {
+      if (el === resolvedNode || el === targetNode) {
         found = true;
         return true;
       }
-      offset += 1;
+      offset += 1; // \n for blank line
       return false;
     },
   });
@@ -296,6 +211,8 @@ function findDomPosition(
 ): DomPosition | null {
   let remaining = targetOffset;
   let result: DomPosition | null = null;
+  // Track last valid position for clamping when offset exceeds document length
+  let lastPos: DomPosition | null = null;
 
   walkDom(container, {
     onText(node, text) {
@@ -305,6 +222,7 @@ function findDomPosition(
         return true;
       }
       remaining -= len;
+      lastPos = { node, offset: len };
       return false;
     },
     onLeafBlockEnd(el) {
@@ -314,17 +232,20 @@ function findDomPosition(
         return true;
       }
       remaining -= 1;
+      lastPos = { node: el, offset: el.childNodes.length };
       return false;
     },
-    onBlockSeparator(nextEl) {
+    onBlankLine(el) {
       if (remaining < 1) {
-        result = { node: nextEl, offset: 0 };
+        result = { node: el, offset: 0 };
         return true;
       }
       remaining -= 1;
+      lastPos = { node: el, offset: el.childNodes.length };
       return false;
     },
   });
 
-  return result;
+  // If offset exceeds document length, clamp to end
+  return result ?? lastPos;
 }
