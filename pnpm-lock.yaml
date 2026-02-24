@@ -45,6 +45,40 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(jsdom@26.1.0)
 
+  packages/editor-cst:
+    dependencies:
+      parser-cst:
+        specifier: workspace:*
+        version: link:../parser-cst
+    devDependencies:
+      '@testing-library/jest-dom':
+        specifier: ^6.0.0
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: ^16.0.0
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.14)
+      jsdom:
+        specifier: ^26.0.0
+        version: 26.1.0
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.4(react@19.2.4)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(jsdom@26.1.0)
+
   packages/parser:
     devDependencies:
       '@vitest/coverage-v8':
@@ -63,11 +97,48 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(jsdom@26.1.0)
 
+  packages/parser-cst:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(jsdom@26.1.0)
+
   packages/sample-app:
     dependencies:
       markdown-editor:
         specifier: workspace:*
         version: link:../editor
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.4(react@19.2.4)
+    devDependencies:
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.14
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.14)
+      '@vitejs/plugin-react':
+        specifier: ^4.0.0
+        version: 4.7.0(vite@6.4.1)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.1
+
+  packages/sample-app-cst:
+    dependencies:
+      editor-cst:
+        specifier: workspace:*
+        version: link:../editor-cst
       react:
         specifier: ^19.0.0
         version: 19.2.4

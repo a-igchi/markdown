@@ -64,48 +64,6 @@ body {
   list-style: none;
 }
 
-.editor em {
-  font-style: italic;
-}
-
-.editor strong {
-  font-weight: bold;
-}
-
-.editor code {
-  background: #f0f0f0;
-  padding: 2px 4px;
-  border-radius: 3px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 0.9em;
-}
-
-.editor pre {
-  background: #f0f0f0;
-  padding: 12px 16px;
-  border-radius: 4px;
-  overflow-x: auto;
-  margin: 0.5em 0;
-}
-
-.editor pre code {
-  background: none;
-  padding: 0;
-  border-radius: 0;
-}
-
-.editor blockquote {
-  border-left: 3px solid #ccc;
-  padding-left: 12px;
-  color: #666;
-  margin: 0.5em 0;
-}
-
-.editor a {
-  color: #0366d6;
-  text-decoration: underline;
-}
-
 .editor [data-block="thematic_break"] {
   border-bottom: 1px solid #ddd;
   padding-bottom: 0.5em;
