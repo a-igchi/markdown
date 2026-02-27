@@ -4,6 +4,9 @@ import {
   matchATXHeading,
   matchThematicBreak,
   matchListItemStart,
+  matchCodeFence,
+  isClosingCodeFence,
+  matchBlockQuote,
 } from "./scanner.js";
 
 describe("isBlankLine", () => {
@@ -111,6 +114,50 @@ describe("matchATXHeading", () => {
     const result = matchATXHeading("# foo#");
     expect(result).not.toBeNull();
     expect(result!.content).toBe("foo#");
+    expect(result!.closingHashes).toBe("");
+  });
+
+  it("greedy match: content with internal # and closing hashes", () => {
+    const result = matchATXHeading("# foo # bar ##");
+    expect(result).not.toBeNull();
+    expect(result!.content).toBe("foo # bar");
+    expect(result!.closingHashes).toBe("##");
+  });
+
+  it("no closing hash when # not preceded by space at end", () => {
+    const result = matchATXHeading("# foo#bar");
+    expect(result).not.toBeNull();
+    expect(result!.content).toBe("foo#bar");
+    expect(result!.closingHashes).toBe("");
+  });
+
+  it("space-hash in middle is not closing if not at end", () => {
+    const result = matchATXHeading("# foo ## bar");
+    expect(result).not.toBeNull();
+    expect(result!.content).toBe("foo ## bar");
+    expect(result!.closingHashes).toBe("");
+  });
+
+  it("hash-only content after space is content, not closing", () => {
+    // "# #" → rest is "#", closing hash requires space before it
+    const result = matchATXHeading("# #");
+    expect(result).not.toBeNull();
+    expect(result!.content).toBe("#");
+    expect(result!.closingHashes).toBe("");
+  });
+
+  it("content with ## and closing ##", () => {
+    const result = matchATXHeading("## foo ## ##");
+    expect(result).not.toBeNull();
+    expect(result!.content).toBe("foo ##");
+    expect(result!.closingHashes).toBe("##");
+  });
+
+  it("backslash before # in content", () => {
+    const result = matchATXHeading("# foo \\#");
+    expect(result).not.toBeNull();
+    // \\# doesn't match (#+)$ because \\ is not #, so it stays in content
+    expect(result!.content).toBe("foo \\#");
     expect(result!.closingHashes).toBe("");
   });
 });
@@ -233,5 +280,123 @@ describe("matchListItemStart", () => {
     const result = matchListItemStart("-  item");
     expect(result).not.toBeNull();
     expect(result!.marker).toBe("-  ");
+  });
+});
+
+describe("matchCodeFence", () => {
+  it("matches triple backtick fence", () => {
+    const result = matchCodeFence("```");
+    expect(result).not.toBeNull();
+    expect(result!.fence).toBe("```");
+    expect(result!.char).toBe("`");
+    expect(result!.fenceLength).toBe(3);
+    expect(result!.info).toBe("");
+  });
+
+  it("matches triple tilde fence", () => {
+    const result = matchCodeFence("~~~");
+    expect(result).not.toBeNull();
+    expect(result!.char).toBe("~");
+  });
+
+  it("matches fence with info string", () => {
+    const result = matchCodeFence("```js");
+    expect(result).not.toBeNull();
+    expect(result!.fence).toBe("```");
+    expect(result!.info).toBe("js");
+  });
+
+  it("matches fence with 0-3 spaces indent", () => {
+    expect(matchCodeFence("   ```")).not.toBeNull();
+    expect(matchCodeFence("   ```")!.indent).toBe("   ");
+  });
+
+  it("does not match 4+ spaces indent", () => {
+    expect(matchCodeFence("    ```")).toBeNull();
+  });
+
+  it("does not match fewer than 3 backticks", () => {
+    expect(matchCodeFence("``")).toBeNull();
+  });
+
+  it("matches 4+ backticks", () => {
+    const result = matchCodeFence("````");
+    expect(result).not.toBeNull();
+    expect(result!.fenceLength).toBe(4);
+  });
+
+  it("rejects backtick fence with backtick in info string", () => {
+    expect(matchCodeFence("``` foo`bar")).toBeNull();
+  });
+
+  it("allows tilde fence with backtick in info string", () => {
+    const result = matchCodeFence("~~~ foo`bar");
+    expect(result).not.toBeNull();
+    expect(result!.info).toBe(" foo`bar");
+  });
+});
+
+describe("isClosingCodeFence", () => {
+  it("matches closing backtick fence", () => {
+    expect(isClosingCodeFence("```", "`", 3)).toBe(true);
+  });
+
+  it("matches closing tilde fence", () => {
+    expect(isClosingCodeFence("~~~", "~", 3)).toBe(true);
+  });
+
+  it("requires same or more chars than opening", () => {
+    expect(isClosingCodeFence("```", "`", 4)).toBe(false);
+    expect(isClosingCodeFence("````", "`", 3)).toBe(true);
+  });
+
+  it("rejects closing fence with info string", () => {
+    expect(isClosingCodeFence("``` js", "`", 3)).toBe(false);
+  });
+
+  it("allows trailing spaces", () => {
+    expect(isClosingCodeFence("```   ", "`", 3)).toBe(true);
+  });
+
+  it("rejects wrong character type", () => {
+    expect(isClosingCodeFence("~~~", "`", 3)).toBe(false);
+    expect(isClosingCodeFence("```", "~", 3)).toBe(false);
+  });
+
+  it("matches with 0-3 spaces indent", () => {
+    expect(isClosingCodeFence("   ```", "`", 3)).toBe(true);
+  });
+
+  it("rejects 4+ spaces indent", () => {
+    expect(isClosingCodeFence("    ```", "`", 3)).toBe(false);
+  });
+});
+
+describe("matchBlockQuote", () => {
+  it("matches > prefix", () => {
+    const result = matchBlockQuote("> foo");
+    expect(result).not.toBeNull();
+    expect(result!.marker).toBe("> ");
+  });
+
+  it("matches > without trailing space", () => {
+    const result = matchBlockQuote(">foo");
+    expect(result).not.toBeNull();
+    expect(result!.marker).toBe(">");
+  });
+
+  it("matches with 0-3 spaces indent", () => {
+    const result = matchBlockQuote("   > foo");
+    expect(result).not.toBeNull();
+    expect(result!.marker).toBe("   > ");
+  });
+
+  it("does not match 4+ spaces indent", () => {
+    expect(matchBlockQuote("    > foo")).toBeNull();
+  });
+
+  it("does not match lines without >", () => {
+    expect(matchBlockQuote("foo")).toBeNull();
+    expect(matchBlockQuote("")).toBeNull();
   });
 });

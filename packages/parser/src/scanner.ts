@@ -41,18 +41,10 @@ export const matchATXHeading = (line: string): ATXHeadingMatch | null => {
   }
 
   // Check for closing hashes (must be preceded by space in original content)
-  const closingMatch = content.match(/^(.*?) (#+)$/);
+  const closingMatch = content.match(/^(.*) (#+)$/);
   if (closingMatch) {
     content = closingMatch[1];
     closingHashes = closingMatch[2];
-  } else if (trailingSpaces && content.match(/^(.*?)(#+)$/)) {
-    // closing hashes with trailing spaces: "# Title #  "
-    // trailingSpaces was already extracted, now check content for closing hashes
-    const closingMatch2 = content.match(/^(.*?) (#+)$/);
-    if (closingMatch2) {
-      content = closingMatch2[1];
-      closingHashes = closingMatch2[2];
-    }
   }
 
   return {
@@ -79,6 +71,43 @@ export const matchThematicBreak = (line: string): ThematicBreakMatch | null => {
   if (!charOnly.split("").every((c) => c === first)) return null;
 
   return { indent, chars };
+};
+
+export type CodeFenceMatch = {
+  indent: string;
+  fence: string;
+  char: "`" | "~";
+  fenceLength: number;
+  info: string;
+};
+
+export const matchCodeFence = (line: string): CodeFenceMatch | null => {
+  const match = line.match(/^( {0,3})(`{3,}|~{3,})(.*)$/);
+  if (!match) return null;
+  const [, indent, fence, info] = match;
+  const char = fence[0] as "`" | "~";
+  // Backtick info string cannot contain backticks (CommonMark §4.5)
+  if (char === "`" && info.includes("`")) return null;
+  return { indent, fence, char, fenceLength: fence.length, info };
+};
+
+export const isClosingCodeFence = (
+  line: string,
+  openChar: "`" | "~",
+  minLength: number,
+): boolean => {
+  const fencePattern = openChar === "`" ? `\`{${minLength},}` : `~{${minLength},}`;
+  return new RegExp(`^( {0,3})${fencePattern}[ \\t]*$`).test(line);
+};
+
+export type BlockQuoteMatch = {
+  marker: string;
+};
+
+export const matchBlockQuote = (line: string): BlockQuoteMatch | null => {
+  const match = line.match(/^( {0,3})> ?/);
+  if (!match) return null;
+  return { marker: match[0] };
 };
 
 export const matchListItemStart = (line: string): ListItemMatch | null => {

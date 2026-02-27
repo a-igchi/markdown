@@ -183,6 +183,36 @@ describe("Editor component (CST)", () => {
       expect(onChange).toHaveBeenCalledWith("- item1\n- item2\n- ");
     });
 
+    it("Enter at end of last list item followed by content does not insert blank line", () => {
+      const onChange = vi.fn();
+      const { container, rerender } = render(
+        <Editor
+          value={"- item1\n- item2\n\nParagraph"}
+          onChange={onChange}
+        />,
+      );
+      const editable = container.querySelector("[contenteditable]")!;
+
+      // Place cursor at end of "item2" inside second <li>
+      const lis = editable.querySelectorAll("[data-block='list_item']");
+      const lastLi = lis[lis.length - 1];
+      const textNode = lastLi.lastChild!;
+      setCursor(textNode, textNode.textContent!.length);
+
+      fireEvent.keyDown(editable, { key: "Enter" });
+      const afterEnter = onChange.mock.calls[0][0];
+      expect(afterEnter).toBe("- item1\n- item2\n- \n\nParagraph");
+
+      // Re-render and verify extractText round-trips correctly
+      // (no extra blank line from the new empty list item)
+      onChange.mockClear();
+      rerender(<Editor value={afterEnter} onChange={onChange} />);
+
+      // The list should remain tight (no loose rendering)
+      const looseItems = editable.querySelectorAll("li > p[data-block='list_item']");
+      expect(looseItems.length).toBe(0);
+    });
+
     it("Enter at end of ordered list item creates next numbered item", () => {
       const onChange = vi.fn();
       const { container } = render(
@@ -419,6 +449,215 @@ describe("Editor component (CST)", () => {
       fireEvent.input(editable);
       expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange.mock.calls[0][0]).toBe("Hello\n\na");
+    });
+
+    it("sequential backspace from last list item through marker into previous item", () => {
+      let currentValue = "- aaa\n- bbb";
+      const onChange = vi.fn((v: string) => {
+        currentValue = v;
+      });
+
+      const { container, rerender } = render(
+        <Editor value={currentValue} onChange={onChange} />,
+      );
+      const editable = container.querySelector("[contenteditable]")!;
+
+      // Helper: simulate browser backspace (delete char before cursor)
+      function backspaceChar() {
+        const sel = window.getSelection()!;
+        if (!sel.rangeCount) return;
+        const range = sel.getRangeAt(0);
+        const node = range.startContainer;
+        const offset = range.startOffset;
+
+        if (node.nodeType === Node.TEXT_NODE && offset > 0) {
+          const text = node.textContent!;
+          node.textContent = text.slice(0, offset - 1) + text.slice(offset);
+          setCursor(node, offset - 1);
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+          // Cursor on element node - find nearest text to delete from
+          const el = node as HTMLElement;
+          if (offset > 0) {
+            const prev = el.childNodes[offset - 1];
+            if (prev && prev.nodeType === Node.TEXT_NODE) {
+              const text = prev.textContent!;
+              prev.textContent = text.slice(0, -1);
+              setCursor(prev, prev.textContent!.length);
+            }
+          }
+        }
+        fireEvent.input(editable);
+      }
+
+      // Helper: step = backspace + re-render
+      function step() {
+        onChange.mockClear();
+        backspaceChar();
+        if (onChange.mock.calls.length > 0) {
+          currentValue = onChange.mock.calls[0][0];
+          onChange.mockClear();
+          rerender(<Editor value={currentValue} onChange={onChange} />);
+        }
+      }
+
+      // Place cursor at end of second list item ("- bbb")
+      const lis = editable.querySelectorAll("[data-block='list_item']");
+      const lastLi = lis[lis.length - 1];
+      setCursor(lastLi.lastChild!, lastLi.lastChild!.textContent!.length);
+
+      // Delete "bbb" + " " + "-" = 5 chars from second item
+      for (let i = 0; i < 5; i++) {
+        step();
+      }
+
+      // At this point, the second list item content is gone.
+      // The DOM has changed to LIST + PARAGRAPH or just LIST.
+      // Continue deleting into previous item.
+      step();
+      step();
+    });
+
+    it("backspace at start of list item merges with previous item", () => {
+      const onChange = vi.fn();
+      const { container } = render(
+        <Editor value={"- aaa\n- bbb"} onChange={onChange} />,
+      );
+      const editable = container.querySelector("[contenteditable]")!;
+
+      // Place cursor at offset 0 of the second list item's text
+      // (i.e., at the very start of "- bbb")
+      const lis = editable.querySelectorAll("[data-block='list_item']");
+      const lastLi = lis[lis.length - 1];
+      setCursor(lastLi.firstChild!, 0);
+
+      // Press Backspace — should be intercepted, not left to browser
+      fireEvent.keyDown(editable, { key: "Backspace" });
+      expect(onChange).toHaveBeenCalledTimes(1);
+      // Should merge: remove the \n before "- bbb"
+      expect(onChange.mock.calls[0][0]).toBe("- aaa- bbb");
+    });
+
+    it("backspace at start of list item after marker deletion merges correctly", () => {
+      let currentValue = "- aaa\n- ";
+      const onChange = vi.fn((v: string) => {
+        currentValue = v;
+      });
+
+      const { container, rerender } = render(
+        <Editor value={currentValue} onChange={onChange} />,
+      );
+      const editable = container.querySelector("[contenteditable]")!;
+
+      // Place cursor at start of second list item
+      const lis = editable.querySelectorAll("[data-block='list_item']");
+      const lastLi = lis[lis.length - 1];
+      setCursor(lastLi.firstChild!, 0);
+
+      // Press Backspace — should be intercepted
+      fireEvent.keyDown(editable, { key: "Backspace" });
+      expect(onChange).toHaveBeenCalledTimes(1);
+      // Should merge with previous item
+      expect(onChange.mock.calls[0][0]).toBe("- aaa- ");
+    });
+
+    it("backspace at start of non-first block (cursor on element node) is intercepted", () => {
+      const onChange = vi.fn();
+      const { container } = render(
+        <Editor value={"- aaa\n\nxyz"} onChange={onChange} />,
+      );
+      const editable = container.querySelector("[contenteditable]")!;
+
+      // DOM: <ul><li>- aaa</li></ul><div data-block="blank_line"><br></div><p>xyz</p>
+      const p = editable.querySelector("p")!;
+
+      // Set cursor at {p, 0} — element position before first child text node.
+      // Real browsers set cursor this way when focusing a block or after block merge.
+      setCursor(p, 0);
+
+      // Backspace should be intercepted (p has a previous sibling block)
+      fireEvent.keyDown(editable, { key: "Backspace" });
+      expect(onChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("backspace at start of empty block with placeholder br is intercepted", () => {
+      const onChange = vi.fn();
+      const { container } = render(
+        <Editor value={"- aaa\n- bbb\n-"} onChange={onChange} />,
+      );
+      const editable = container.querySelector("[contenteditable]")!;
+
+      // DOM: <ul><li>- aaa</li><li>- bbb</li></ul><p>-</p>
+      const p = editable.querySelector("p[data-block='paragraph']")!;
+      expect(p.textContent).toBe("-");
+
+      // Simulate real browser: after deleting last char, block becomes <p><br></p>
+      p.innerHTML = "<br>";
+      setCursor(p, 0);
+
+      // Backspace should be intercepted to prevent browser from removing <p>,
+      // which would cause React reconciliation error
+      fireEvent.keyDown(editable, { key: "Backspace" });
+      expect(onChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("Enter to create list item, backspace to remove it, then continue into previous item", () => {
+      let currentValue = "- aaa\n- bbb";
+      const onChange = vi.fn((v: string) => {
+        currentValue = v;
+      });
+
+      const { container, rerender } = render(
+        <Editor value={currentValue} onChange={onChange} />,
+      );
+      const editable = container.querySelector("[contenteditable]")!;
+
+      // Enter at end of second item
+      const lis = editable.querySelectorAll("[data-block='list_item']");
+      setCursor(lis[1].lastChild!, lis[1].lastChild!.textContent!.length);
+      fireEvent.keyDown(editable, { key: "Enter" });
+      currentValue = onChange.mock.calls[0][0];
+      expect(currentValue).toBe("- aaa\n- bbb\n- ");
+      onChange.mockClear();
+      rerender(<Editor value={currentValue} onChange={onChange} />);
+
+      // Backspace 1: delete " " from new list item (browser handles)
+      {
+        const li3 = editable.querySelectorAll("[data-block='list_item']")[2];
+        li3.lastChild!.textContent = "-";
+        setCursor(li3.lastChild!, 1);
+        fireEvent.input(editable);
+        currentValue = onChange.mock.calls[0][0];
+        expect(currentValue).toBe("- aaa\n- bbb\n-");
+        onChange.mockClear();
+        rerender(<Editor value={currentValue} onChange={onChange} />);
+      }
+
+      // Backspace 2: delete "-" from <p> (browser handles)
+      {
+        const p = editable.querySelector("p")!;
+        expect(p.textContent).toBe("-");
+        p.firstChild!.textContent = "";
+        setCursor(p.firstChild!, 0);
+        fireEvent.input(editable);
+        currentValue = onChange.mock.calls[0][0];
+        onChange.mockClear();
+        rerender(<Editor value={currentValue} onChange={onChange} />);
+      }
+
+      // After rerender: <p> removed, DOM has only <ul> with 2 <li>
+      // Cursor should be restored near end of li2
+
+      // Backspace 3: delete last char of "bbb"
+      {
+        const li2 = editable.querySelectorAll("[data-block='list_item']")[1];
+        const textNode = li2.lastChild!;
+        setCursor(textNode, textNode.textContent!.length);
+        textNode.textContent = "- bb";
+        setCursor(textNode, 4);
+        fireEvent.input(editable);
+        expect(onChange).toHaveBeenCalled();
+        expect(currentValue).toBe("- aaa\n- bb");
+      }
     });
 
     it("Enter mid-paragraph creates soft break, typing continues on new line", () => {

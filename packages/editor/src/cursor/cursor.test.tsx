@@ -96,5 +96,20 @@ describe("cursor save/restore (CST)", () => {
         expect(restored).toBe(pos);
       }
     });
+
+    it("restores cursor at document end", () => {
+      const source = "Hello";
+      const el = renderIntoContainer(source);
+      restoreCursorFromOffset(el, source.length);
+      expect(saveCursorAsOffset(el)).toBe(source.length);
+    });
+
+    it("handles empty document", () => {
+      const el = renderIntoContainer("");
+      restoreCursorFromOffset(el, 0);
+      // Cursor should be at 0 or null for empty doc
+      const offset = saveCursorAsOffset(el);
+      expect(offset === 0 || offset === null).toBe(true);
+    });
   });
 });

@@ -12,3 +12,4 @@ export {
   findFirstToken,
 } from "./nodes.js";
 export { parse } from "./parser.js";
+export { parseInlines, parseInlineWithHardLineBreak } from "./inline-parser.js";

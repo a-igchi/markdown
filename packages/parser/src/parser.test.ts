@@ -257,6 +257,24 @@ describe("parse: nested lists", () => {
   });
 });
 
+describe("parse: empty list item does not produce BLANK_LINE", () => {
+  it("empty list item with newline uses NEWLINE token, not BLANK_LINE", () => {
+    const doc = parse("- item1\n- \n- item2\n");
+    const list = childNode(doc, 0);
+    expect(list.children).toHaveLength(3);
+    // The second item (empty) should have MARKER + NEWLINE, not BLANK_LINE
+    const emptyItem = childNode(list, 1);
+    const hasBlankLine = emptyItem.children.some(
+      (c) => c.kind === SyntaxKind.BLANK_LINE,
+    );
+    expect(hasBlankLine).toBe(false);
+    const hasNewline = emptyItem.children.some(
+      (c) => isToken(c) && c.kind === SyntaxKind.NEWLINE,
+    );
+    expect(hasNewline).toBe(true);
+  });
+});
+
 describe("parse: tight vs loose lists", () => {
   it("parses tight list (no blank lines between items)", () => {
     const doc = parse("- one\n- two\n");
@@ -335,12 +353,204 @@ describe("parse: round-trip fidelity", () => {
     "   \n",
     "- one\n\n- two\n",
     "- line1\n  line2\n",
+    // Windows line endings
+    "Hello\r\nWorld\r\n",
+    // Unicode content
+    "# 日本語の見出し\n",
+    "こんにちは世界\n",
+    "# Ñoño\n\n🎉 emoji paragraph\n",
+    // Empty list item
+    "- \n",
+    // Deep nested list (3+ levels)
+    "- a\n  - b\n    - c\n",
+    // Long numbered list
+    "999999999. item\n",
+    // Consecutive thematic breaks
+    "---\n---\n",
+    "---\n\n---\n",
+    // Heading immediately followed by list
+    "# Title\n- item\n",
+    // Complex document with all block types
+    "# Title\n\nparagraph\n\n- a\n- b\n\n1. one\n2. two\n\n---\n\n## Sub\n\nmore text\n",
   ];
 
   cases.forEach((input) => {
     it(`round-trips: ${JSON.stringify(input)}`, () => {
       const doc = parse(input);
       expect(getText(doc)).toBe(input);
+    });
+  });
+});
+
+describe("parse: stripIndent tab handling", () => {
+  it("round-trips list continuation with tab indent", () => {
+    const input = "- line1\n\tline2\n";
+    const doc = parse(input);
+    expect(getText(doc)).toBe(input);
+  });
+
+  it("round-trips list with mixed tab and space indent", () => {
+    const input = "- line1\n \tline2\n";
+    const doc = parse(input);
+    expect(getText(doc)).toBe(input);
+  });
+});
+
+describe("parse: inline elements in paragraphs", () => {
+  it("parses code span in paragraph", () => {
+    const doc = parse("`code`\n");
+    const para = childNode(doc, 0);
+    expect(para.kind).toBe(SyntaxKind.PARAGRAPH);
+    const span = para.children.find((c) => c.kind === SyntaxKind.CODE_SPAN);
+    expect(span).toBeDefined();
+  });
+
+  it("parses emphasis in paragraph", () => {
+    const doc = parse("*bold*\n");
+    const para = childNode(doc, 0);
+    const em = para.children.find((c) => c.kind === SyntaxKind.EMPHASIS);
+    expect(em).toBeDefined();
+  });
+
+  it("round-trips paragraph with code span", () => {
+    const input = "Hello `world`\n";
+    expect(getText(parse(input))).toBe(input);
+  });
+
+  it("round-trips paragraph with link", () => {
+    const input = "[text](url)\n";
+    expect(getText(parse(input))).toBe(input);
+  });
+
+  it("round-trips heading with emphasis", () => {
+    const input = "# *Hello*\n";
+    expect(getText(parse(input))).toBe(input);
+  });
+});
+
+describe("parse: hard line breaks", () => {
+  it("detects trailing 2+ spaces as hard line break", () => {
+    const doc = parse("foo  \nbar\n");
+    const para = childNode(doc, 0);
+    const hlb = para.children.find((c) => c.kind === SyntaxKind.HARD_LINE_BREAK);
+    expect(hlb).toBeDefined();
+  });
+
+  it("round-trips hard line break (trailing spaces)", () => {
+    const input = "foo  \nbar\n";
+    expect(getText(parse(input))).toBe(input);
+  });
+
+  it("round-trips hard line break (backslash)", () => {
+    const input = "foo\\\nbar\n";
+    expect(getText(parse(input))).toBe(input);
+  });
+});
+
+describe("parse: fenced code blocks", () => {
+  it("parses basic fenced code block", () => {
+    const doc = parse("```\ncode\n```\n");
+    expect(doc.children).toHaveLength(1);
+    const fcb = childNode(doc, 0);
+    expect(fcb.kind).toBe(SyntaxKind.FENCED_CODE_BLOCK);
+    // CODE_FENCE, NEWLINE, CODE_CONTENT, CODE_FENCE, NEWLINE
+    expect(fcb.children.some((c) => c.kind === SyntaxKind.CODE_FENCE)).toBe(true);
+    expect(fcb.children.some((c) => c.kind === SyntaxKind.CODE_CONTENT)).toBe(true);
+  });
+
+  it("parses fenced code block with info string", () => {
+    const doc = parse("```js\nconst x = 1;\n```\n");
+    const fcb = childNode(doc, 0);
+    expect(fcb.kind).toBe(SyntaxKind.FENCED_CODE_BLOCK);
+    const info = fcb.children.find((c) => c.kind === SyntaxKind.INFO_STRING);
+    expect(info).toBeDefined();
+    expect((info as SyntaxToken).text).toBe("js");
+  });
+
+  it("parses unclosed fenced code block (EOF)", () => {
+    const doc = parse("```\ncode");
+    const fcb = childNode(doc, 0);
+    expect(fcb.kind).toBe(SyntaxKind.FENCED_CODE_BLOCK);
+    const content = fcb.children.find((c) => c.kind === SyntaxKind.CODE_CONTENT);
+    expect(content).toBeDefined();
+    expect((content as SyntaxToken).text).toBe("code");
+  });
+
+  it("parses tilde fenced code block", () => {
+    const doc = parse("~~~\ncode\n~~~\n");
+    const fcb = childNode(doc, 0);
+    expect(fcb.kind).toBe(SyntaxKind.FENCED_CODE_BLOCK);
+  });
+
+  it("does not close with fewer fence chars", () => {
+    const doc = parse("````\ncode\n```\nmore\n````\n");
+    const fcb = childNode(doc, 0);
+    expect(fcb.kind).toBe(SyntaxKind.FENCED_CODE_BLOCK);
+    const content = fcb.children.find((c) => c.kind === SyntaxKind.CODE_CONTENT);
+    expect((content as SyntaxToken).text).toBe("code\n```\nmore\n");
+  });
+
+  it("fenced code block interrupts paragraph", () => {
+    const doc = parse("para\n```\ncode\n```\n");
+    expect(doc.children).toHaveLength(2);
+    expect(doc.children[0].kind).toBe(SyntaxKind.PARAGRAPH);
+    expect(doc.children[1].kind).toBe(SyntaxKind.FENCED_CODE_BLOCK);
+  });
+});
+
+describe("parse: block quotes", () => {
+  it("parses single-line block quote", () => {
+    const doc = parse("> foo\n");
+    expect(doc.children).toHaveLength(1);
+    const bq = childNode(doc, 0);
+    expect(bq.kind).toBe(SyntaxKind.BLOCK_QUOTE);
+    expect(bq.children.some((c) => c.kind === SyntaxKind.BLOCK_QUOTE_MARKER)).toBe(true);
+  });
+
+  it("parses multi-line block quote", () => {
+    const doc = parse("> foo\n> bar\n");
+    const bq = childNode(doc, 0);
+    expect(bq.kind).toBe(SyntaxKind.BLOCK_QUOTE);
+    const markers = bq.children.filter((c) => c.kind === SyntaxKind.BLOCK_QUOTE_MARKER);
+    expect(markers).toHaveLength(2);
+  });
+
+  it("block quote ends at non-> line", () => {
+    const doc = parse("> foo\nparagraph\n");
+    expect(doc.children).toHaveLength(2);
+    expect(doc.children[0].kind).toBe(SyntaxKind.BLOCK_QUOTE);
+    expect(doc.children[1].kind).toBe(SyntaxKind.PARAGRAPH);
+  });
+});
+
+describe("parse: fenced code block round-trips", () => {
+  const cases = [
+    "```\n```\n",
+    "```\ncode\n```\n",
+    "```js\nconst x = 1;\n```\n",
+    "~~~\nfoo\n~~~\n",
+    "````\nhas ``` inside\n````\n",
+    "```\ncode",
+    "   ```\ncode\n   ```\n",
+    "```\nline1\nline2\n```\n",
+  ];
+  cases.forEach((input) => {
+    it(`round-trips: ${JSON.stringify(input)}`, () => {
+      expect(getText(parse(input))).toBe(input);
+    });
+  });
+});
+
+describe("parse: block quote round-trips", () => {
+  const cases = [
+    "> foo\n",
+    "> foo\n> bar\n",
+    ">foo\n",
+    "   > foo\n",
+  ];
+  cases.forEach((input) => {
+    it(`round-trips: ${JSON.stringify(input)}`, () => {
+      expect(getText(parse(input))).toBe(input);
     });
   });
 });

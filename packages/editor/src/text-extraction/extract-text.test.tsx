@@ -89,6 +89,13 @@ describe("extractText (CST round-trip)", () => {
     });
   });
 
+  describe("additional edge cases", () => {
+    it("handles very long single paragraph", () => {
+      const long = "A".repeat(10000);
+      expect(roundTrip(long)).toBe(long);
+    });
+  });
+
   describe("placeholder br handling", () => {
     it("ignores a placeholder <br> (sole child of a block element)", () => {
       const container = document.createElement("div");

@@ -172,6 +172,100 @@ describe("cstToReact", () => {
     });
   });
 
+  describe("edge cases", () => {
+    it("renders empty document without errors", () => {
+      const el = renderMarkdown("");
+      // Empty doc should render without children (or minimal structure)
+      expect(el).not.toBeNull();
+    });
+
+    it("renders deeply nested list (3 levels)", () => {
+      const el = renderMarkdown("- a\n  - b\n    - c");
+      const items = el.querySelectorAll("[data-block='list_item']");
+      expect(items.length).toBe(3);
+      expect(items[0].textContent).toBe("- a");
+      expect(items[1].textContent).toBe("  - b");
+      expect(items[2].textContent).toBe("    - c");
+    });
+  });
+
+  describe("inline elements", () => {
+    it("renders code span as <code>", () => {
+      const el = renderMarkdown("Hello `world`");
+      const code = el.querySelector("code");
+      expect(code).not.toBeNull();
+      expect(code!.textContent).toBe("`world`");
+    });
+
+    it("renders emphasis as <em>", () => {
+      const el = renderMarkdown("Hello *world*");
+      const em = el.querySelector("em");
+      expect(em).not.toBeNull();
+      expect(em!.textContent).toBe("*world*");
+    });
+
+    it("renders strong emphasis as <strong>", () => {
+      const el = renderMarkdown("Hello **world**");
+      const strong = el.querySelector("strong");
+      expect(strong).not.toBeNull();
+      expect(strong!.textContent).toBe("**world**");
+    });
+
+    it("renders link as <a>", () => {
+      const el = renderMarkdown("[text](url)");
+      const a = el.querySelector("a");
+      expect(a).not.toBeNull();
+      expect(a!.textContent).toBe("[text](url)");
+      expect(a!.getAttribute("href")).toBe("url");
+    });
+
+    it("renders image as <span data-image>", () => {
+      const el = renderMarkdown("![alt](img.png)");
+      const span = el.querySelector("[data-image]");
+      expect(span).not.toBeNull();
+      expect(span!.textContent).toBe("![alt](img.png)");
+    });
+
+    it("paragraph with mixed inline and plain text has correct textContent", () => {
+      const el = renderMarkdown("foo `bar` baz");
+      const p = el.querySelector("p");
+      expect(p!.textContent).toBe("foo `bar` baz");
+    });
+  });
+
+  describe("fenced code blocks", () => {
+    it("renders fenced code block as pre", () => {
+      const el = renderMarkdown("```\ncode\n```");
+      const pre = el.querySelector("pre");
+      expect(pre).not.toBeNull();
+      expect(pre!.dataset.block).toBe("fenced_code_block");
+      expect(pre!.textContent).toContain("code");
+    });
+
+    it("renders fenced code block with info string", () => {
+      const el = renderMarkdown("```js\nconst x = 1;\n```");
+      const pre = el.querySelector("pre");
+      expect(pre).not.toBeNull();
+      expect(pre!.textContent).toContain("js");
+    });
+  });
+
+  describe("block quotes", () => {
+    it("renders block quote as blockquote", () => {
+      const el = renderMarkdown("> foo");
+      const bq = el.querySelector("blockquote");
+      expect(bq).not.toBeNull();
+      expect(bq!.dataset.block).toBe("block_quote");
+    });
+
+    it("renders block quote lines with > visible", () => {
+      const el = renderMarkdown("> foo\n> bar");
+      const bq = el.querySelector("blockquote");
+      expect(bq!.textContent).toContain("> foo");
+      expect(bq!.textContent).toContain("> bar");
+    });
+  });
+
   describe("complete document", () => {
     it("renders the task example correctly", () => {
       const source = "# Heading 1\n\nParagraph text.\n\n- list1\n- list2";

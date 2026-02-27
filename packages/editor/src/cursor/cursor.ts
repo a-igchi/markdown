@@ -146,6 +146,19 @@ export function saveCursorAsOffset(container: HTMLElement): number | null {
     }
   }
 
+  // If resolved to a placeholder <br>, the walk will skip it and fail to find
+  // the cursor. Treat as cursor being at the boundary of the parent block.
+  if (
+    resolvedNode.nodeType === Node.ELEMENT_NODE &&
+    (resolvedNode as HTMLElement).tagName.toLowerCase() === "br" &&
+    isPlaceholderBr(resolvedNode as HTMLElement)
+  ) {
+    const brParent = resolvedNode.parentElement;
+    if (brParent) {
+      resolvedNode = brParent;
+    }
+  }
+
   let offset = 0;
   let found = false;
 

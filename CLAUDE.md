@@ -1,93 +1,63 @@
-# CLAUDE.md
+# AGENT.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Puropse
 
-## Repository Overview
+This repository is a monorepo for handling markdown.
 
-pnpm monorepo with three packages:
+## Direcotry
 
-- **`packages/parser`** (`markdown-parser`) — Zero-dependency CommonMark parser; produces an AST with source-location metadata on every node
-- **`packages/editor`** (`markdown-editor`) — React WYSIWYG editor built on top of the parser; renders markdown syntax literally (e.g. `# ` prefix stays visible)
-- **`packages/sample-app`** — Vite/React demo app
+- `agent-docs`: Documents for coding agent
+- `packages`: Packages in this repo
 
-The editor depends on the parser via `workspace:*`.
+## Packages
+
+- `parser`: Markdown parser
+- `editor`: Markdown WYSIWYG editor
+- `sample-app`: Sample application using the parser and editor
 
 ## Commands
 
-### Root (runs across all packages)
+For root direcotory:
+
 ```bash
-pnpm test       # all tests
-pnpm build      # all packages
-```
+pnpm install # Install dependencies for all packages
+pnpm run build # Build all packages
+pnpm run test # Run tests for all packages
+``` 
 
-### Per-package
+For each package:
+
 ```bash
-# from packages/parser or packages/editor
-pnpm test            # vitest run --coverage
-pnpm test:watch      # vitest watch
-
-# parser only
-pnpm lint            # oxlint
-pnpm lint:fix
-pnpm fmt             # oxfmt
-pnpm fmt:check
-
-# sample-app only
-pnpm dev             # vite dev server
+pnpm run build # Build the package
+pnpm run test # Run tests for the package
+pnpm run lint # Lint the package
+pnpm run lint:fix # Fix linting issues
+pnpm run format # Format the code
 ```
 
-### Running a single test file
-```bash
-cd packages/parser
-pnpm exec vitest run tests/block/atx-heading.test.ts
+## About Testing
 
-cd packages/editor
-pnpm exec vitest run tests/rendering/ast-to-react.test.tsx
-```
+- Unit Tests
+    - File name: `*.test.ts`
+    - Located in the same directory as the code being tested
+    - Should cover individual functions and components in isolation
+- Integration Tests
+    - File name: `test/**/*.test.ts`
+    - Located in the `tests` directory at the root of each package
+    - Should cover the interaction between multiple components or functions
+- E2E Tests (If necessary)
+    - File name: `e2e/**/*.test.ts`
+    - Located in the `e2e` directory at the root of each package
+    - Should cover the entire flow of the application from the user's perspective
 
-## Architecture
+## Coding Guidelines
 
-### Parser — two-phase design
+- Use TypeScript for all packages
+- You should follow test-driven development (TDD) approach. This should be done in Unit Tests.
+    1. **Red**: Write a failing test case that defines a desired improvement or new function.
+    2. **Green**: Write the minimum amount of code necessary to make the test pass.
+    3. **Refactor**: Clean up the code, ensuring it adheres to best practices
 
-**Phase 1 — Block parsing** (`src/parser/block/block-parser.ts`):
-Splits input into `LineInfo[]` (each line carries its absolute character `offset` in the original string), then recognises ATX headings, paragraphs, lists, fenced code blocks, blockquotes, thematic breaks, blank lines, and link-reference definitions.
-Container blocks (blockquote, list item) strip their markers and call `parseBlocks` **recursively on the stripped sub-content**. This means all child node `sourceLocation` offsets are relative to the stripped sub-string, not the original source — a critical fact for any renderer that uses `source[node.offset]` to recover marker characters.
+## Prohibited Practices
 
-**Phase 2 — Inline parsing** (`src/parser/inline/inline-parser.ts`):
-`processInlines` walks block nodes and replaces empty `children: []` with parsed inline nodes (Text, Emphasis, Strong, Link, CodeSpan, SoftBreak, HardBreak). Uses a delimiter-stack algorithm for emphasis/strong matching.
-
-**Entry point** (`src/index.ts`):
-```ts
-export function parse(input: string): Document
-```
-
-Every AST node carries `sourceLocation: { start: Position, end: Position }` where `Position = { line, column, offset }`. This is the foundation for WYSIWYG cursor tracking.
-
-### Editor — contentEditable with offset-based cursors
-
-**`Editor.tsx`** is a controlled component (`value` / `onChange`). Flow on each keystroke:
-
-1. `handleInput` → `saveCursorAsOffset(container)` captures cursor as a plain integer character offset (via `extractText` semantics), then `extractText(container)` reconstructs the markdown string, then `onChange(newText)` fires.
-2. Parent updates `value` → React re-renders → `useLayoutEffect` → `restoreCursorFromOffset(container, offset)` puts the cursor back.
-
-Enter key inserts `\n\n` (new blank-line block) at the cursor offset.
-
-**`ast-to-react.tsx`** — renders AST nodes to JSX, deliberately keeping markdown syntax visible (WYSIWYG):
-- `#` prefix in headings, `- ` / `1. ` in list items, delimiters in `<em>`/`<strong>`, full link syntax in `<a>`, raw fences in `<pre><code>`
-- `blank_line` → `<div data-block="blank_line">` (needed as a cursor target)
-- `thematic_break` → `<div data-block="thematic_break">` (can't use `<hr>` — void element can't hold text)
-- **Blockquote sub-source**: because the parser strips `> ` before recursing, `renderBlockQuote` must reconstruct the same stripped sub-source before passing it to child renderers, so that `source[emphasis.start.offset]` yields the correct delimiter character.
-
-**`extract-text.ts`** — walks the rendered DOM and reconstructs the markdown string:
-- `ul`, `ol`, `blockquote` → container blocks, recurse without adding newlines
-- `h1–h6`, `p`, `li`, `pre`, `div[data-block]` → leaf blocks, append `\n` after content
-- `blank_line` → contributes an extra `\n` (producing an empty line between the surrounding blocks' trailing newlines)
-- `<br>` that is the sole child of a block element → placeholder, ignored
-
-**`cursor.ts`** — `saveCursorAsOffset` / `restoreCursorFromOffset` walk the same DOM using the same leaf/container rules as `extract-text.ts` to map between a DOM `Range` and a plain integer offset into the markdown string.
-
-### Test structure
-
-- Parser tests live under `packages/parser/tests/` and are plain `.test.ts` (no DOM needed)
-- Editor tests live under `packages/editor/tests/` and are `.test.tsx`; vitest uses jsdom + `@testing-library/react`
-- Editor test directories: `rendering/`, `text-extraction/`, `cursor/`, `integration/`
+- Do not use `node -e` to test code snippets. Always write proper test cases in the test files.

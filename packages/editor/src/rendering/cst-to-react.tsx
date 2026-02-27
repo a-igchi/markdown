@@ -45,6 +45,10 @@ function renderElement(element: SyntaxElement, key: string): ReactNode {
       return renderThematicBreak(node, key);
     case SyntaxKind.LIST:
       return renderList(node, key);
+    case SyntaxKind.FENCED_CODE_BLOCK:
+      return renderFencedCodeBlock(node, key);
+    case SyntaxKind.BLOCK_QUOTE:
+      return renderBlockQuote(node, key);
     default:
       return null;
   }
@@ -52,23 +56,93 @@ function renderElement(element: SyntaxElement, key: string): ReactNode {
 
 /**
  * Get visible text for a block: all token text except trailing NEWLINE.
+ * Used for blocks that don't contain inline nodes (thematic break, fenced code block).
  */
 function getVisibleText(node: SyntaxNode): string {
   const children = node.children;
-  let parts: string[] = [];
+  const parts: string[] = [];
   for (let i = 0; i < children.length; i++) {
     const child = children[i];
     if (isToken(child)) {
-      // Skip trailing newline (last token)
-      if (child.kind === SyntaxKind.NEWLINE && i === children.length - 1) {
-        continue;
-      }
+      if (child.kind === SyntaxKind.NEWLINE && i === children.length - 1) continue;
       parts.push(child.text);
     } else {
       parts.push(getText(child));
     }
   }
   return parts.join("");
+}
+
+/**
+ * Render inline content of a block node as React nodes.
+ * Adjacent plain text tokens are merged into a single string (preserving
+ * single-text-node behavior for headings/paragraphs without inline markup).
+ * Inline nodes (CODE_SPAN, EMPHASIS, etc.) are wrapped in appropriate elements.
+ */
+function renderInlineContent(node: SyntaxNode, keyPrefix: string): ReactNode[] {
+  const children = node.children;
+  const result: ReactNode[] = [];
+  let textBuffer = "";
+
+  function flushText() {
+    if (textBuffer) {
+      result.push(textBuffer);
+      textBuffer = "";
+    }
+  }
+
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+
+    if (isToken(child)) {
+      // Skip trailing NEWLINE
+      if (child.kind === SyntaxKind.NEWLINE && i === children.length - 1) continue;
+      textBuffer += child.text;
+      continue;
+    }
+
+    const subKey = `${keyPrefix}-i${i}`;
+    switch (child.kind) {
+      case SyntaxKind.CODE_SPAN:
+        flushText();
+        result.push(<code key={subKey}>{getText(child)}</code>);
+        break;
+      case SyntaxKind.EMPHASIS:
+        flushText();
+        result.push(<em key={subKey}>{getText(child)}</em>);
+        break;
+      case SyntaxKind.STRONG_EMPHASIS:
+        flushText();
+        result.push(<strong key={subKey}>{getText(child)}</strong>);
+        break;
+      case SyntaxKind.LINK: {
+        flushText();
+        const destToken = child.children.find(
+          (c) => isToken(c) && c.kind === SyntaxKind.LINK_DESTINATION,
+        );
+        const href = destToken && isToken(destToken) ? destToken.text : "#";
+        result.push(
+          <a key={subKey} href={href}>
+            {getText(child)}
+          </a>,
+        );
+        break;
+      }
+      case SyntaxKind.IMAGE:
+        flushText();
+        result.push(
+          <span key={subKey} data-image="true">
+            {getText(child)}
+          </span>,
+        );
+        break;
+      default:
+        textBuffer += getText(child);
+    }
+  }
+
+  flushText();
+  return result;
 }
 
 function getHeadingLevel(node: SyntaxNode): 1 | 2 | 3 | 4 | 5 | 6 {
@@ -83,19 +157,19 @@ function getHeadingLevel(node: SyntaxNode): 1 | 2 | 3 | 4 | 5 | 6 {
 function renderHeading(node: SyntaxNode, key: string): ReactNode {
   const level = getHeadingLevel(node);
   const Tag = `h${level}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6";
-  const text = getVisibleText(node);
+  const content = renderInlineContent(node, key);
   return (
     <Tag key={key} data-block="heading">
-      {text}
+      {content}
     </Tag>
   );
 }
 
 function renderParagraph(node: SyntaxNode, key: string): ReactNode {
-  const text = getVisibleText(node);
+  const content = renderInlineContent(node, key);
   return (
     <p key={key} data-block="paragraph">
-      {text}
+      {content}
     </p>
   );
 }
@@ -106,6 +180,52 @@ function renderThematicBreak(node: SyntaxNode, key: string): ReactNode {
     <div key={key} data-block="thematic_break">
       {text}
     </div>
+  );
+}
+
+function renderFencedCodeBlock(node: SyntaxNode, key: string): ReactNode {
+  const text = getVisibleText(node);
+  return (
+    <pre key={key} data-block="fenced_code_block">
+      {text}
+    </pre>
+  );
+}
+
+function renderBlockQuote(node: SyntaxNode, key: string): ReactNode {
+  const lines: ReactNode[] = [];
+  let lineText = "";
+  let lineIdx = 0;
+
+  for (const child of node.children) {
+    if (isToken(child)) {
+      if (child.kind === SyntaxKind.NEWLINE) {
+        lines.push(
+          <div key={`${key}-${lineIdx}`} data-block="bq_line">
+            {lineText || <br />}
+          </div>,
+        );
+        lineText = "";
+        lineIdx++;
+      } else {
+        lineText += child.text;
+      }
+    }
+  }
+
+  // Last line without trailing newline
+  if (lineText) {
+    lines.push(
+      <div key={`${key}-${lineIdx}`} data-block="bq_line">
+        {lineText}
+      </div>,
+    );
+  }
+
+  return (
+    <blockquote key={key} data-block="block_quote">
+      {lines}
+    </blockquote>
   );
 }
 

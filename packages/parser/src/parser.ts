@@ -5,11 +5,15 @@ import {
   type SyntaxNode,
   type SyntaxElement,
 } from "./nodes.js";
+import { parseInlines, parseInlineWithHardLineBreak } from "./inline-parser.js";
 import {
   isBlankLine,
   matchATXHeading,
   matchThematicBreak,
   matchListItemStart,
+  matchCodeFence,
+  isClosingCodeFence,
+  matchBlockQuote,
 } from "./scanner.js";
 
 /**
@@ -89,6 +93,11 @@ const parseBlock = (
     return parseBlankLine(lines, pos, offset, indentLevel);
   }
 
+  // Fenced code block
+  if (matchCodeFence(content)) {
+    return parseFencedCodeBlock(lines, pos, offset, indentLevel);
+  }
+
   // ATX Heading
   if (matchATXHeading(content)) {
     return parseATXHeading(lines, pos, offset, indentLevel);
@@ -97,6 +106,11 @@ const parseBlock = (
   // Thematic break (must check before list to handle "- - -" correctly)
   if (matchThematicBreak(content)) {
     return parseThematicBreak(lines, pos, offset, indentLevel);
+  }
+
+  // Block quote
+  if (matchBlockQuote(content)) {
+    return parseBlockQuote(lines, pos, offset, indentLevel);
   }
 
   // List
@@ -172,7 +186,8 @@ const parseATXHeading = (
   }
 
   if (match.content) {
-    children.push(createToken(SyntaxKind.TEXT, match.content, tokenOffset));
+    const inlineElements = parseInlines(match.content, tokenOffset);
+    children.push(...inlineElements);
     tokenOffset += match.content.length;
   }
 
@@ -254,15 +269,25 @@ const parseParagraph = (
     // Check if this line starts a new block that would interrupt the paragraph
     if (currentPos > pos) {
       if (isBlankLine(content)) break;
+      if (matchCodeFence(content)) break;
       if (matchATXHeading(content)) break;
       if (matchThematicBreak(content)) break;
+      if (matchBlockQuote(content)) break;
       if (matchListItemStart(content)) break;
     }
 
-    children.push(createToken(SyntaxKind.TEXT, rawText, tokenOffset));
+    const { inlines, hardLineBreak } = parseInlineWithHardLineBreak(
+      rawText,
+      line.hasNewline,
+      tokenOffset,
+    );
+    children.push(...inlines);
     tokenOffset += rawText.length;
 
-    if (line.hasNewline) {
+    if (hardLineBreak) {
+      children.push(hardLineBreak);
+      tokenOffset += hardLineBreak.length;
+    } else if (line.hasNewline) {
       children.push(createToken(SyntaxKind.NEWLINE, "\n", tokenOffset));
       tokenOffset += 1;
     }
@@ -387,12 +412,18 @@ const parseListItem = (
   const contentLines: Line[] = [];
 
   // First line's content
-  if (contentAfterMarker || line.hasNewline) {
+  if (contentAfterMarker) {
     contentLines.push({
       text: contentAfterMarker,
       hasNewline: line.hasNewline,
       offset: tokenOffset,
     });
+  } else if (line.hasNewline) {
+    // Empty content after marker (e.g., "- \n"): emit NEWLINE directly.
+    // If pushed as a content line, parseContentLines would misinterpret
+    // the empty text as a BLANK_LINE, incorrectly making the list loose.
+    children.push(createToken(SyntaxKind.NEWLINE, "\n", tokenOffset));
+    tokenOffset += 1;
   }
 
   // Continuation lines
@@ -462,6 +493,14 @@ const parseContentLines = (
       continue;
     }
 
+    if (matchCodeFence(content)) {
+      const result = parseFencedCodeBlock(contentLines, pos, currentOffset, indentLevel);
+      elements.push(...result.elements);
+      currentOffset += result.elements.reduce((sum, el) => sum + el.length, 0);
+      pos = result.nextPos;
+      continue;
+    }
+
     if (matchATXHeading(content)) {
       const result = parseATXHeading(contentLines, pos, currentOffset, indentLevel);
       elements.push(...result.elements);
@@ -472,6 +511,14 @@ const parseContentLines = (
 
     if (matchThematicBreak(content)) {
       const result = parseThematicBreak(contentLines, pos, currentOffset, indentLevel);
+      elements.push(...result.elements);
+      currentOffset += result.elements.reduce((sum, el) => sum + el.length, 0);
+      pos = result.nextPos;
+      continue;
+    }
+
+    if (matchBlockQuote(content)) {
+      const result = parseBlockQuote(contentLines, pos, currentOffset, indentLevel);
       elements.push(...result.elements);
       currentOffset += result.elements.reduce((sum, el) => sum + el.length, 0);
       pos = result.nextPos;
@@ -496,16 +543,26 @@ const parseContentLines = (
 
       if (pos > 0 || paraChildren.length > 0) {
         if (isBlankLine(pContent)) break;
+        if (matchCodeFence(pContent)) break;
         if (matchATXHeading(pContent)) break;
         if (matchThematicBreak(pContent)) break;
+        if (matchBlockQuote(pContent)) break;
         if (matchListItemStart(pContent)) break;
       }
 
-      // Use raw text for round-trip fidelity
-      paraChildren.push(createToken(SyntaxKind.TEXT, pLine.text, currentOffset));
+      // Use raw text for round-trip fidelity; apply inline parsing
+      const { inlines: pInlines, hardLineBreak: pHlb } = parseInlineWithHardLineBreak(
+        pLine.text,
+        pLine.hasNewline,
+        currentOffset,
+      );
+      paraChildren.push(...pInlines);
       currentOffset += pLine.text.length;
 
-      if (pLine.hasNewline) {
+      if (pHlb) {
+        paraChildren.push(pHlb);
+        currentOffset += pHlb.length;
+      } else if (pLine.hasNewline) {
         paraChildren.push(createToken(SyntaxKind.NEWLINE, "\n", currentOffset));
         currentOffset += 1;
       }
@@ -518,4 +575,151 @@ const parseContentLines = (
   }
 
   return elements;
+};
+
+const parseFencedCodeBlock = (
+  lines: Line[],
+  pos: number,
+  offset: number,
+  indentLevel: number,
+): ParseResult => {
+  const line = lines[pos];
+  const rawText = line.text;
+  const content = indentLevel > 0 ? stripIndent(rawText, indentLevel) : rawText;
+  const match = matchCodeFence(content)!;
+  const children: SyntaxElement[] = [];
+  let tokenOffset = offset;
+
+  // Leading whitespace from parent indent stripping
+  const rawPrefix = rawText.slice(0, rawText.length - content.length);
+  if (rawPrefix) {
+    children.push(createToken(SyntaxKind.WHITESPACE, rawPrefix, tokenOffset));
+    tokenOffset += rawPrefix.length;
+  }
+
+  // Fence's own indent (0-3 spaces)
+  if (match.indent) {
+    children.push(createToken(SyntaxKind.WHITESPACE, match.indent, tokenOffset));
+    tokenOffset += match.indent.length;
+  }
+
+  // Opening fence chars
+  children.push(createToken(SyntaxKind.CODE_FENCE, match.fence, tokenOffset));
+  tokenOffset += match.fence.length;
+
+  // Info string
+  if (match.info) {
+    children.push(createToken(SyntaxKind.INFO_STRING, match.info, tokenOffset));
+    tokenOffset += match.info.length;
+  }
+
+  // Opening newline
+  if (line.hasNewline) {
+    children.push(createToken(SyntaxKind.NEWLINE, "\n", tokenOffset));
+    tokenOffset += 1;
+  }
+
+  let currentPos = pos + 1;
+  let codeContent = "";
+
+  while (currentPos < lines.length) {
+    const codeLine = lines[currentPos];
+    const codeRaw = codeLine.text;
+    const codeContent_ =
+      indentLevel > 0 ? stripIndent(codeRaw, indentLevel) : codeRaw;
+
+    if (isClosingCodeFence(codeContent_, match.char, match.fenceLength)) {
+      // Flush accumulated code content
+      if (codeContent) {
+        children.push(createToken(SyntaxKind.CODE_CONTENT, codeContent, tokenOffset));
+        tokenOffset += codeContent.length;
+        codeContent = "";
+      }
+
+      // Closing fence tokens
+      const closeRawPrefix = codeRaw.slice(0, codeRaw.length - codeContent_.length);
+      if (closeRawPrefix) {
+        children.push(createToken(SyntaxKind.WHITESPACE, closeRawPrefix, tokenOffset));
+        tokenOffset += closeRawPrefix.length;
+      }
+
+      const closeMatch = codeContent_.match(/^( {0,3})([`~]+)([ \t]*)$/);
+      if (closeMatch) {
+        if (closeMatch[1]) {
+          children.push(createToken(SyntaxKind.WHITESPACE, closeMatch[1], tokenOffset));
+          tokenOffset += closeMatch[1].length;
+        }
+        children.push(createToken(SyntaxKind.CODE_FENCE, closeMatch[2], tokenOffset));
+        tokenOffset += closeMatch[2].length;
+        if (closeMatch[3]) {
+          children.push(createToken(SyntaxKind.WHITESPACE, closeMatch[3], tokenOffset));
+          tokenOffset += closeMatch[3].length;
+        }
+      }
+
+      if (codeLine.hasNewline) {
+        children.push(createToken(SyntaxKind.NEWLINE, "\n", tokenOffset));
+      }
+      currentPos++;
+      break;
+    }
+
+    codeContent += codeRaw + (codeLine.hasNewline ? "\n" : "");
+    currentPos++;
+  }
+
+  // Unclosed fence: emit remaining code content
+  if (codeContent) {
+    children.push(createToken(SyntaxKind.CODE_CONTENT, codeContent, tokenOffset));
+  }
+
+  return {
+    elements: [createNode(SyntaxKind.FENCED_CODE_BLOCK, children, offset)],
+    nextPos: currentPos,
+  };
+};
+
+const parseBlockQuote = (
+  lines: Line[],
+  pos: number,
+  offset: number,
+  indentLevel: number,
+): ParseResult => {
+  const children: SyntaxElement[] = [];
+  let tokenOffset = offset;
+  let currentPos = pos;
+
+  while (currentPos < lines.length) {
+    const line = lines[currentPos];
+    const rawText = line.text;
+    const content = indentLevel > 0 ? stripIndent(rawText, indentLevel) : rawText;
+
+    const bqMatch = matchBlockQuote(content);
+    if (!bqMatch) break;
+
+    // Full marker = parent-indent-prefix + bqMatch.marker
+    const rawParentPrefix = rawText.slice(0, rawText.length - content.length);
+    const fullMarker = rawParentPrefix + bqMatch.marker;
+    children.push(createToken(SyntaxKind.BLOCK_QUOTE_MARKER, fullMarker, tokenOffset));
+    tokenOffset += fullMarker.length;
+
+    const contentAfterMarker = content.slice(bqMatch.marker.length);
+
+    if (contentAfterMarker) {
+      children.push(createToken(SyntaxKind.TEXT, contentAfterMarker, tokenOffset));
+      tokenOffset += contentAfterMarker.length;
+    }
+
+    if (line.hasNewline) {
+      children.push(createToken(SyntaxKind.NEWLINE, "\n", tokenOffset));
+      tokenOffset += 1;
+    }
+
+    currentPos++;
+  }
+
+  return {
+    elements: [createNode(SyntaxKind.BLOCK_QUOTE, children, offset)],
+    nextPos: currentPos,
+  };
 };
