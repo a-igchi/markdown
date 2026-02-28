@@ -91,13 +91,21 @@ export const matchCodeFence = (line: string): CodeFenceMatch | null => {
   return { indent, fence, char, fenceLength: fence.length, info };
 };
 
+const closingFenceCache = new Map<string, RegExp>();
+
 export const isClosingCodeFence = (
   line: string,
   openChar: "`" | "~",
   minLength: number,
 ): boolean => {
-  const fencePattern = openChar === "`" ? `\`{${minLength},}` : `~{${minLength},}`;
-  return new RegExp(`^( {0,3})${fencePattern}[ \\t]*$`).test(line);
+  const key = openChar + minLength;
+  let re = closingFenceCache.get(key);
+  if (!re) {
+    const fencePattern = openChar === "`" ? `\`{${minLength},}` : `~{${minLength},}`;
+    re = new RegExp(`^( {0,3})${fencePattern}[ \\t]*$`);
+    closingFenceCache.set(key, re);
+  }
+  return re.test(line);
 };
 
 export type BlockQuoteMatch = {
@@ -108,6 +116,25 @@ export const matchBlockQuote = (line: string): BlockQuoteMatch | null => {
   const match = line.match(/^( {0,3})> ?/);
   if (!match) return null;
   return { marker: match[0] };
+};
+
+export type BlockKind =
+  | "blank"
+  | "codeFence"
+  | "atxHeading"
+  | "thematicBreak"
+  | "blockQuote"
+  | "listItem"
+  | "paragraph";
+
+export const classifyLine = (content: string): BlockKind => {
+  if (isBlankLine(content)) return "blank";
+  if (matchCodeFence(content)) return "codeFence";
+  if (matchATXHeading(content)) return "atxHeading";
+  if (matchThematicBreak(content)) return "thematicBreak";
+  if (matchBlockQuote(content)) return "blockQuote";
+  if (matchListItemStart(content)) return "listItem";
+  return "paragraph";
 };
 
 export const matchListItemStart = (line: string): ListItemMatch | null => {

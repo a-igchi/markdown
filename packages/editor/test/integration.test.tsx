@@ -1,16 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
-import { parse, getText } from "../../parser/dist/index.js";
-import { cstToReact } from "../src/rendering/cst-to-react.js";
-import { extractText } from "../src/text-extraction/extract-text.js";
+import { parse, getText } from "parser-cst";
 import { Editor } from "../src/index.js";
-
-function roundTrip(source: string): string {
-  const doc = parse(source);
-  const elements = cstToReact(doc);
-  const { container } = render(<div>{elements}</div>);
-  return extractText(container.firstElementChild as HTMLElement);
-}
+import { roundTrip } from "./test-helpers.jsx";
 
 describe("integration: CST round-trip", () => {
   it("round-trips a complex document", () => {

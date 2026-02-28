@@ -1,12 +1,12 @@
+import { getLineAt } from "./text-utils.js";
+
 const INDENT = "  "; // 2 spaces
 
 export function indentListItem(
   value: string,
   offset: number,
 ): { newValue: string; newOffset: number } | null {
-  const lineStart = value.lastIndexOf("\n", offset - 1) + 1;
-  const lineEnd = value.indexOf("\n", offset);
-  const fullLine = value.slice(lineStart, lineEnd === -1 ? value.length : lineEnd);
+  const { lineStart, fullLine } = getLineAt(value, offset);
 
   if (!isListLine(fullLine)) return null;
 
@@ -18,9 +18,7 @@ export function dedentListItem(
   value: string,
   offset: number,
 ): { newValue: string; newOffset: number } | null {
-  const lineStart = value.lastIndexOf("\n", offset - 1) + 1;
-  const lineEnd = value.indexOf("\n", offset);
-  const fullLine = value.slice(lineStart, lineEnd === -1 ? value.length : lineEnd);
+  const { lineStart, fullLine } = getLineAt(value, offset);
 
   if (!isListLine(fullLine)) return null;
 

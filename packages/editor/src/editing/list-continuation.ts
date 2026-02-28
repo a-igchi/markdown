@@ -1,11 +1,10 @@
+import { getLineAt } from "./text-utils.js";
+
 export function getListContinuation(
   value: string,
   offset: number,
 ): { insertion: string; cursorOffset: number } {
-  // Find current line boundaries
-  const lineStart = value.lastIndexOf("\n", offset - 1) + 1;
-  const lineEnd = value.indexOf("\n", offset);
-  const fullLine = value.slice(lineStart, lineEnd === -1 ? value.length : lineEnd);
+  const { fullLine } = getLineAt(value, offset);
 
   // Bullet: /^( {0,3})([-+*] +)/
   const bulletMatch = fullLine.match(/^( {0,3})([-+*] +)/);

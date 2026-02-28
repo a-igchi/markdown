@@ -5,9 +5,10 @@
  * of extracted markdown text before the cursor). This offset survives
  * React re-renders because it's independent of DOM node identity.
  *
- * IMPORTANT: The DOM walking logic here MUST match extract-text.ts exactly
- * so that offsets are consistent.
+ * DOM classification utilities are shared with extract-text.ts via dom-utils.ts.
  */
+
+import { isLeafBlock, isPlaceholderBr, isContainerBlock } from "../dom-utils.js";
 
 // --- Shared DOM walker ---
 
@@ -55,7 +56,7 @@ function walkDom(container: HTMLElement, callbacks: WalkCallbacks): void {
     }
 
     // Container blocks — recurse
-    if (tag === "ul" || tag === "ol" || tag === "blockquote" || (tag === "li" && !el.dataset.block)) {
+    if (isContainerBlock(tag, el)) {
       for (const child of el.childNodes) {
         if (walk(child)) return true;
       }
@@ -88,29 +89,6 @@ function walkDom(container: HTMLElement, callbacks: WalkCallbacks): void {
   for (const child of container.childNodes) {
     if (walk(child)) break;
   }
-}
-
-function isLeafBlock(tag: string, el: HTMLElement): boolean {
-  return (
-    /^h[1-6]$/.test(tag) ||
-    tag === "p" ||
-    tag === "pre" ||
-    (tag === "div" && el.dataset.block !== undefined) ||
-    (tag === "li" && el.dataset.block !== undefined)
-  );
-}
-
-function isPlaceholderBr(br: HTMLElement): boolean {
-  const parent = br.parentElement;
-  if (!parent) return false;
-  if (parent.childNodes.length !== 1) return false;
-  const parentTag = parent.tagName.toLowerCase();
-  return (
-    parentTag === "div" ||
-    parentTag === "p" ||
-    parentTag === "li" ||
-    /^h[1-6]$/.test(parentTag)
-  );
 }
 
 // --- Save cursor as text offset ---

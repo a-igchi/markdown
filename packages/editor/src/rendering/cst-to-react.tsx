@@ -5,7 +5,7 @@ import {
   isToken,
   isNode,
   getText,
-} from "../../../parser/dist";
+} from "parser-cst";
 import type { ReactNode } from "react";
 
 /**

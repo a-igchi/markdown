@@ -7,13 +7,14 @@ import {
 } from "./nodes.js";
 import { parseInlines, parseInlineWithHardLineBreak } from "./inline-parser.js";
 import {
-  isBlankLine,
   matchATXHeading,
   matchThematicBreak,
   matchListItemStart,
   matchCodeFence,
   isClosingCodeFence,
   matchBlockQuote,
+  isBlankLine,
+  classifyLine,
 } from "./scanner.js";
 
 /**
@@ -88,38 +89,15 @@ const parseBlock = (
   const line = lines[pos];
   const content = indentLevel > 0 ? stripIndent(line.text, indentLevel) : line.text;
 
-  // Blank line
-  if (isBlankLine(content)) {
-    return parseBlankLine(lines, pos, offset, indentLevel);
+  switch (classifyLine(content)) {
+    case "blank":        return parseBlankLine(lines, pos, offset, indentLevel);
+    case "codeFence":    return parseFencedCodeBlock(lines, pos, offset, indentLevel);
+    case "atxHeading":   return parseATXHeading(lines, pos, offset, indentLevel);
+    case "thematicBreak":return parseThematicBreak(lines, pos, offset, indentLevel);
+    case "blockQuote":   return parseBlockQuote(lines, pos, offset, indentLevel);
+    case "listItem":     return parseList(lines, pos, offset, indentLevel);
+    case "paragraph":    return parseParagraph(lines, pos, offset, indentLevel);
   }
-
-  // Fenced code block
-  if (matchCodeFence(content)) {
-    return parseFencedCodeBlock(lines, pos, offset, indentLevel);
-  }
-
-  // ATX Heading
-  if (matchATXHeading(content)) {
-    return parseATXHeading(lines, pos, offset, indentLevel);
-  }
-
-  // Thematic break (must check before list to handle "- - -" correctly)
-  if (matchThematicBreak(content)) {
-    return parseThematicBreak(lines, pos, offset, indentLevel);
-  }
-
-  // Block quote
-  if (matchBlockQuote(content)) {
-    return parseBlockQuote(lines, pos, offset, indentLevel);
-  }
-
-  // List
-  if (matchListItemStart(content)) {
-    return parseList(lines, pos, offset, indentLevel);
-  }
-
-  // Paragraph (default)
-  return parseParagraph(lines, pos, offset, indentLevel);
 };
 
 const stripIndent = (text: string, indent: number): string => {
@@ -137,6 +115,15 @@ const stripIndent = (text: string, indent: number): string => {
     }
   }
   return text.slice(i);
+};
+
+/** Strip leading indent from `text` and return both the stripped prefix and the remaining content. */
+const stripIndentWithPrefix = (
+  text: string,
+  indent: number,
+): { prefix: string; content: string } => {
+  const content = indent > 0 ? stripIndent(text, indent) : text;
+  return { prefix: text.slice(0, text.length - content.length), content };
 };
 
 const parseBlankLine = (
@@ -158,18 +145,15 @@ const parseATXHeading = (
   indentLevel: number,
 ): ParseResult => {
   const line = lines[pos];
-  const content = indentLevel > 0 ? stripIndent(line.text, indentLevel) : line.text;
+  const { prefix: rawPrefix, content } = stripIndentWithPrefix(line.text, indentLevel);
   const match = matchATXHeading(content)!;
   const children: SyntaxElement[] = [];
   let tokenOffset = offset;
 
   // If we stripped indent for nesting, we still need the raw text
-  if (indentLevel > 0) {
-    const rawPrefix = line.text.slice(0, line.text.length - content.length);
-    if (rawPrefix) {
-      children.push(createToken(SyntaxKind.WHITESPACE, rawPrefix, tokenOffset));
-      tokenOffset += rawPrefix.length;
-    }
+  if (rawPrefix) {
+    children.push(createToken(SyntaxKind.WHITESPACE, rawPrefix, tokenOffset));
+    tokenOffset += rawPrefix.length;
   }
 
   if (match.indent) {
@@ -220,17 +204,14 @@ const parseThematicBreak = (
   indentLevel: number,
 ): ParseResult => {
   const line = lines[pos];
-  const content = indentLevel > 0 ? stripIndent(line.text, indentLevel) : line.text;
+  const { prefix: rawPrefix, content } = stripIndentWithPrefix(line.text, indentLevel);
   const match = matchThematicBreak(content)!;
   const children: SyntaxElement[] = [];
   let tokenOffset = offset;
 
-  if (indentLevel > 0) {
-    const rawPrefix = line.text.slice(0, line.text.length - content.length);
-    if (rawPrefix) {
-      children.push(createToken(SyntaxKind.WHITESPACE, rawPrefix, tokenOffset));
-      tokenOffset += rawPrefix.length;
-    }
+  if (rawPrefix) {
+    children.push(createToken(SyntaxKind.WHITESPACE, rawPrefix, tokenOffset));
+    tokenOffset += rawPrefix.length;
   }
 
   if (match.indent) {
@@ -267,14 +248,7 @@ const parseParagraph = (
     const content = indentLevel > 0 ? stripIndent(rawText, indentLevel) : rawText;
 
     // Check if this line starts a new block that would interrupt the paragraph
-    if (currentPos > pos) {
-      if (isBlankLine(content)) break;
-      if (matchCodeFence(content)) break;
-      if (matchATXHeading(content)) break;
-      if (matchThematicBreak(content)) break;
-      if (matchBlockQuote(content)) break;
-      if (matchListItemStart(content)) break;
-    }
+    if (currentPos > pos && classifyLine(content) !== "paragraph") break;
 
     const { inlines, hardLineBreak } = parseInlineWithHardLineBreak(
       rawText,
@@ -485,93 +459,20 @@ const parseContentLines = (
     const line = contentLines[pos];
     const content = indentLevel > 0 ? stripIndent(line.text, indentLevel) : line.text;
 
-    if (isBlankLine(content)) {
-      const fullText = line.text + (line.hasNewline ? "\n" : "");
-      elements.push(createToken(SyntaxKind.BLANK_LINE, fullText, currentOffset));
-      currentOffset += fullText.length;
-      pos++;
-      continue;
+    let result: ParseResult;
+    switch (classifyLine(content)) {
+      case "blank":        result = parseBlankLine(contentLines, pos, currentOffset, indentLevel); break;
+      case "codeFence":    result = parseFencedCodeBlock(contentLines, pos, currentOffset, indentLevel); break;
+      case "atxHeading":   result = parseATXHeading(contentLines, pos, currentOffset, indentLevel); break;
+      case "thematicBreak":result = parseThematicBreak(contentLines, pos, currentOffset, indentLevel); break;
+      case "blockQuote":   result = parseBlockQuote(contentLines, pos, currentOffset, indentLevel); break;
+      case "listItem":     result = parseList(contentLines, pos, currentOffset, indentLevel); break;
+      case "paragraph":    result = parseParagraph(contentLines, pos, currentOffset, indentLevel); break;
     }
 
-    if (matchCodeFence(content)) {
-      const result = parseFencedCodeBlock(contentLines, pos, currentOffset, indentLevel);
-      elements.push(...result.elements);
-      currentOffset += result.elements.reduce((sum, el) => sum + el.length, 0);
-      pos = result.nextPos;
-      continue;
-    }
-
-    if (matchATXHeading(content)) {
-      const result = parseATXHeading(contentLines, pos, currentOffset, indentLevel);
-      elements.push(...result.elements);
-      currentOffset += result.elements.reduce((sum, el) => sum + el.length, 0);
-      pos = result.nextPos;
-      continue;
-    }
-
-    if (matchThematicBreak(content)) {
-      const result = parseThematicBreak(contentLines, pos, currentOffset, indentLevel);
-      elements.push(...result.elements);
-      currentOffset += result.elements.reduce((sum, el) => sum + el.length, 0);
-      pos = result.nextPos;
-      continue;
-    }
-
-    if (matchBlockQuote(content)) {
-      const result = parseBlockQuote(contentLines, pos, currentOffset, indentLevel);
-      elements.push(...result.elements);
-      currentOffset += result.elements.reduce((sum, el) => sum + el.length, 0);
-      pos = result.nextPos;
-      continue;
-    }
-
-    if (matchListItemStart(content)) {
-      const result = parseList(contentLines, pos, currentOffset, indentLevel);
-      elements.push(...result.elements);
-      currentOffset += result.elements.reduce((sum, el) => sum + el.length, 0);
-      pos = result.nextPos;
-      continue;
-    }
-
-    // Default: paragraph
-    const paraChildren: SyntaxElement[] = [];
-    let paraOffset = currentOffset;
-
-    while (pos < contentLines.length) {
-      const pLine = contentLines[pos];
-      const pContent = indentLevel > 0 ? stripIndent(pLine.text, indentLevel) : pLine.text;
-
-      if (pos > 0 || paraChildren.length > 0) {
-        if (isBlankLine(pContent)) break;
-        if (matchCodeFence(pContent)) break;
-        if (matchATXHeading(pContent)) break;
-        if (matchThematicBreak(pContent)) break;
-        if (matchBlockQuote(pContent)) break;
-        if (matchListItemStart(pContent)) break;
-      }
-
-      // Use raw text for round-trip fidelity; apply inline parsing
-      const { inlines: pInlines, hardLineBreak: pHlb } = parseInlineWithHardLineBreak(
-        pLine.text,
-        pLine.hasNewline,
-        currentOffset,
-      );
-      paraChildren.push(...pInlines);
-      currentOffset += pLine.text.length;
-
-      if (pHlb) {
-        paraChildren.push(pHlb);
-        currentOffset += pHlb.length;
-      } else if (pLine.hasNewline) {
-        paraChildren.push(createToken(SyntaxKind.NEWLINE, "\n", currentOffset));
-        currentOffset += 1;
-      }
-      pos++;
-    }
-
-    if (paraChildren.length > 0) {
-      elements.push(createNode(SyntaxKind.PARAGRAPH, paraChildren, paraOffset));
-    }
+    elements.push(...result.elements);
+    currentOffset += result.elements.reduce((sum, el) => sum + el.length, 0);
+    pos = result.nextPos;
   }
 
   return elements;
@@ -584,14 +485,12 @@ const parseFencedCodeBlock = (
   indentLevel: number,
 ): ParseResult => {
   const line = lines[pos];
-  const rawText = line.text;
-  const content = indentLevel > 0 ? stripIndent(rawText, indentLevel) : rawText;
+  const { prefix: rawPrefix, content } = stripIndentWithPrefix(line.text, indentLevel);
   const match = matchCodeFence(content)!;
   const children: SyntaxElement[] = [];
   let tokenOffset = offset;
 
   // Leading whitespace from parent indent stripping
-  const rawPrefix = rawText.slice(0, rawText.length - content.length);
   if (rawPrefix) {
     children.push(createToken(SyntaxKind.WHITESPACE, rawPrefix, tokenOffset));
     tokenOffset += rawPrefix.length;
@@ -624,11 +523,12 @@ const parseFencedCodeBlock = (
 
   while (currentPos < lines.length) {
     const codeLine = lines[currentPos];
-    const codeRaw = codeLine.text;
-    const codeContent_ =
-      indentLevel > 0 ? stripIndent(codeRaw, indentLevel) : codeRaw;
+    const { prefix: closeRawPrefix, content: strippedCodeLine } = stripIndentWithPrefix(
+      codeLine.text,
+      indentLevel,
+    );
 
-    if (isClosingCodeFence(codeContent_, match.char, match.fenceLength)) {
+    if (isClosingCodeFence(strippedCodeLine, match.char, match.fenceLength)) {
       // Flush accumulated code content
       if (codeContent) {
         children.push(createToken(SyntaxKind.CODE_CONTENT, codeContent, tokenOffset));
@@ -637,13 +537,12 @@ const parseFencedCodeBlock = (
       }
 
       // Closing fence tokens
-      const closeRawPrefix = codeRaw.slice(0, codeRaw.length - codeContent_.length);
       if (closeRawPrefix) {
         children.push(createToken(SyntaxKind.WHITESPACE, closeRawPrefix, tokenOffset));
         tokenOffset += closeRawPrefix.length;
       }
 
-      const closeMatch = codeContent_.match(/^( {0,3})([`~]+)([ \t]*)$/);
+      const closeMatch = strippedCodeLine.match(/^( {0,3})([`~]+)([ \t]*)$/);
       if (closeMatch) {
         if (closeMatch[1]) {
           children.push(createToken(SyntaxKind.WHITESPACE, closeMatch[1], tokenOffset));
@@ -664,7 +563,7 @@ const parseFencedCodeBlock = (
       break;
     }
 
-    codeContent += codeRaw + (codeLine.hasNewline ? "\n" : "");
+    codeContent += codeLine.text + (codeLine.hasNewline ? "\n" : "");
     currentPos++;
   }
 
@@ -691,14 +590,12 @@ const parseBlockQuote = (
 
   while (currentPos < lines.length) {
     const line = lines[currentPos];
-    const rawText = line.text;
-    const content = indentLevel > 0 ? stripIndent(rawText, indentLevel) : rawText;
+    const { prefix: rawParentPrefix, content } = stripIndentWithPrefix(line.text, indentLevel);
 
     const bqMatch = matchBlockQuote(content);
     if (!bqMatch) break;
 
     // Full marker = parent-indent-prefix + bqMatch.marker
-    const rawParentPrefix = rawText.slice(0, rawText.length - content.length);
     const fullMarker = rawParentPrefix + bqMatch.marker;
     children.push(createToken(SyntaxKind.BLOCK_QUOTE_MARKER, fullMarker, tokenOffset));
     tokenOffset += fullMarker.length;

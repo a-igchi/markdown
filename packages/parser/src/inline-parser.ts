@@ -22,205 +22,30 @@ export function parseInlines(text: string, baseOffset: number): SyntaxElement[] 
   while (pos < text.length) {
     const ch = text[pos];
 
-    // Code span: backtick string
     if (ch === "`") {
-      const openStart = pos;
-      let openLen = 0;
-      while (pos < text.length && text[pos] === "`") {
-        openLen++;
-        pos++;
-      }
-      const closePos = findClosingBackticks(text, pos, openLen);
-      if (closePos !== -1) {
-        flushText(openStart);
-        const spanOffset = baseOffset + openStart;
-        const spanChildren: SyntaxElement[] = [];
-        let spanOff = spanOffset;
-
-        spanChildren.push(createToken(SyntaxKind.BACKTICK, text.slice(openStart, openStart + openLen), spanOff));
-        spanOff += openLen;
-
-        const codeText = text.slice(pos, closePos);
-        if (codeText) {
-          spanChildren.push(createToken(SyntaxKind.TEXT, codeText, spanOff));
-          spanOff += codeText.length;
-        }
-
-        spanChildren.push(createToken(SyntaxKind.BACKTICK, text.slice(closePos, closePos + openLen), spanOff));
-
-        elements.push(createNode(SyntaxKind.CODE_SPAN, spanChildren, spanOffset));
-        pos = closePos + openLen;
-        textStart = pos;
-        continue;
-      }
-      // No closing backtick found — treat as literal text, continue from openStart+1
-      pos = openStart + 1;
-      continue;
-    }
-
-    // Emphasis / Strong Emphasis: * or _
-    if (ch === "*" || ch === "_") {
-      const markerStart = pos;
-      const markerChar = ch;
-      let markerLen = 0;
-      while (pos < text.length && text[pos] === markerChar) {
-        markerLen++;
-        pos++;
-      }
-
-      const strong = markerLen >= 2;
-      const expectedLen = strong ? 2 : 1;
-
-      const closePos = findClosingEmphasis(text, pos, markerChar, expectedLen);
-      if (closePos !== -1) {
-        flushText(markerStart);
-        const emphOffset = baseOffset + markerStart;
-        const emphChildren: SyntaxElement[] = [];
-        let emphOff = emphOffset;
-
-        const openMarker = text.slice(markerStart, markerStart + expectedLen);
-        emphChildren.push(createToken(SyntaxKind.EMPHASIS_MARKER, openMarker, emphOff));
-        emphOff += expectedLen;
-
-        // Parse inner content recursively
-        const innerText = text.slice(markerStart + expectedLen, closePos);
-        const innerElements = parseInlines(innerText, emphOff);
-        emphChildren.push(...innerElements);
-        emphOff += innerText.length;
-
-        emphChildren.push(createToken(SyntaxKind.EMPHASIS_MARKER, text.slice(closePos, closePos + expectedLen), emphOff));
-
-        const kind = strong ? SyntaxKind.STRONG_EMPHASIS : SyntaxKind.EMPHASIS;
-        elements.push(createNode(kind, emphChildren, emphOffset));
-
-        // Consume only expectedLen of the opening markers
-        // If markerLen > expectedLen, the extra chars become literal text
-        pos = closePos + expectedLen;
-        textStart = pos;
-        continue;
-      }
-      // No closing found — treat as literal
-      pos = markerStart + 1;
-      continue;
-    }
-
-    // Inline link: [text](dest "title")
-    if (ch === "[") {
-      const linkStart = pos;
-      const closePos = findMatchingBracket(text, pos + 1);
-      if (closePos !== -1 && text[closePos + 1] === "(") {
-        const destEnd = findClosingParen(text, closePos + 2);
-        if (destEnd !== -1) {
-          flushText(linkStart);
-          const linkOffset = baseOffset + linkStart;
-          const linkChildren: SyntaxElement[] = [];
-          let linkOff = linkOffset;
-
-          linkChildren.push(createToken(SyntaxKind.LINK_OPEN, "[", linkOff));
-          linkOff += 1;
-
-          const linkTextContent = text.slice(linkStart + 1, closePos);
-          const textNode = createNode(
-            SyntaxKind.LINK_TEXT,
-            parseInlines(linkTextContent, linkOff),
-            linkOff,
-          );
-          linkChildren.push(textNode);
-          linkOff += linkTextContent.length;
-
-          linkChildren.push(createToken(SyntaxKind.LINK_CLOSE, "]", linkOff));
-          linkOff += 1;
-
-          linkChildren.push(createToken(SyntaxKind.LINK_DEST_OPEN, "(", linkOff));
-          linkOff += 1;
-
-          const destContent = text.slice(closePos + 2, destEnd);
-          if (destContent) {
-            // Split destination and optional title
-            const titleMatch = destContent.match(/^(.*?)( +"[^"]*"| +'[^']*'| +\([^)]*\))$/);
-            if (titleMatch) {
-              const dest = titleMatch[1];
-              const title = titleMatch[2];
-              if (dest) {
-                linkChildren.push(createToken(SyntaxKind.LINK_DESTINATION, dest, linkOff));
-                linkOff += dest.length;
-              }
-              linkChildren.push(createToken(SyntaxKind.LINK_TITLE, title, linkOff));
-              linkOff += title.length;
-            } else {
-              linkChildren.push(createToken(SyntaxKind.LINK_DESTINATION, destContent, linkOff));
-              linkOff += destContent.length;
-            }
-          }
-
-          linkChildren.push(createToken(SyntaxKind.LINK_DEST_CLOSE, ")", linkOff));
-
-          elements.push(createNode(SyntaxKind.LINK, linkChildren, linkOffset));
-          pos = destEnd + 1;
-          textStart = pos;
-          continue;
-        }
-      }
+      const result = tryParseCodeSpan(text, pos, baseOffset);
+      if (result) { flushText(pos); elements.push(result.element); pos = result.newPos; textStart = pos; continue; }
       pos++;
       continue;
     }
 
-    // Inline image: ![alt](dest "title")
+    if (ch === "*" || ch === "_") {
+      const result = tryParseEmphasis(text, pos, baseOffset);
+      if (result) { flushText(pos); elements.push(result.element); pos = result.newPos; textStart = pos; continue; }
+      pos++;
+      continue;
+    }
+
+    if (ch === "[") {
+      const result = tryParseLink(text, pos, baseOffset);
+      if (result) { flushText(pos); elements.push(result.element); pos = result.newPos; textStart = pos; continue; }
+      pos++;
+      continue;
+    }
+
     if (ch === "!" && pos + 1 < text.length && text[pos + 1] === "[") {
-      const imgStart = pos;
-      const closePos = findMatchingBracket(text, pos + 2);
-      if (closePos !== -1 && text[closePos + 1] === "(") {
-        const destEnd = findClosingParen(text, closePos + 2);
-        if (destEnd !== -1) {
-          flushText(imgStart);
-          const imgOffset = baseOffset + imgStart;
-          const imgChildren: SyntaxElement[] = [];
-          let imgOff = imgOffset;
-
-          imgChildren.push(createToken(SyntaxKind.IMAGE_OPEN, "![", imgOff));
-          imgOff += 2;
-
-          const altContent = text.slice(imgStart + 2, closePos);
-          const altNode = createNode(
-            SyntaxKind.IMAGE_ALT,
-            parseInlines(altContent, imgOff),
-            imgOff,
-          );
-          imgChildren.push(altNode);
-          imgOff += altContent.length;
-
-          imgChildren.push(createToken(SyntaxKind.LINK_CLOSE, "]", imgOff));
-          imgOff += 1;
-
-          imgChildren.push(createToken(SyntaxKind.LINK_DEST_OPEN, "(", imgOff));
-          imgOff += 1;
-
-          const destContent = text.slice(closePos + 2, destEnd);
-          if (destContent) {
-            const titleMatch = destContent.match(/^(.*?)( +"[^"]*"| +'[^']*'| +\([^)]*\))$/);
-            if (titleMatch) {
-              const dest = titleMatch[1];
-              const title = titleMatch[2];
-              if (dest) {
-                imgChildren.push(createToken(SyntaxKind.LINK_DESTINATION, dest, imgOff));
-                imgOff += dest.length;
-              }
-              imgChildren.push(createToken(SyntaxKind.LINK_TITLE, title, imgOff));
-              imgOff += title.length;
-            } else {
-              imgChildren.push(createToken(SyntaxKind.LINK_DESTINATION, destContent, imgOff));
-              imgOff += destContent.length;
-            }
-          }
-
-          imgChildren.push(createToken(SyntaxKind.LINK_DEST_CLOSE, ")", imgOff));
-
-          elements.push(createNode(SyntaxKind.IMAGE, imgChildren, imgOffset));
-          pos = destEnd + 1;
-          textStart = pos;
-          continue;
-        }
-      }
+      const result = tryParseImage(text, pos, baseOffset);
+      if (result) { flushText(pos); elements.push(result.element); pos = result.newPos; textStart = pos; continue; }
       pos++;
       continue;
     }
@@ -230,6 +55,152 @@ export function parseInlines(text: string, baseOffset: number): SyntaxElement[] 
 
   flushText(text.length);
   return elements;
+}
+
+type InlineParseResult = { element: SyntaxElement; newPos: number };
+
+function tryParseCodeSpan(
+  text: string,
+  pos: number,
+  baseOffset: number,
+): InlineParseResult | null {
+  const openStart = pos;
+  let openLen = 0;
+  while (pos < text.length && text[pos] === "`") { openLen++; pos++; }
+  const closePos = findClosingBackticks(text, pos, openLen);
+  if (closePos === -1) return null;
+
+  const spanOffset = baseOffset + openStart;
+  const spanChildren: SyntaxElement[] = [];
+  let spanOff = spanOffset;
+
+  spanChildren.push(createToken(SyntaxKind.BACKTICK, text.slice(openStart, openStart + openLen), spanOff));
+  spanOff += openLen;
+
+  const codeText = text.slice(pos, closePos);
+  if (codeText) {
+    spanChildren.push(createToken(SyntaxKind.TEXT, codeText, spanOff));
+    spanOff += codeText.length;
+  }
+
+  spanChildren.push(createToken(SyntaxKind.BACKTICK, text.slice(closePos, closePos + openLen), spanOff));
+
+  return {
+    element: createNode(SyntaxKind.CODE_SPAN, spanChildren, spanOffset),
+    newPos: closePos + openLen,
+  };
+}
+
+function tryParseEmphasis(
+  text: string,
+  pos: number,
+  baseOffset: number,
+): InlineParseResult | null {
+  const markerStart = pos;
+  const markerChar = text[pos];
+  let markerLen = 0;
+  while (pos < text.length && text[pos] === markerChar) { markerLen++; pos++; }
+
+  const strong = markerLen >= 2;
+  const expectedLen = strong ? 2 : 1;
+  const closePos = findClosingEmphasis(text, pos, markerChar, expectedLen);
+  if (closePos === -1) return null;
+
+  const emphOffset = baseOffset + markerStart;
+  const emphChildren: SyntaxElement[] = [];
+  let emphOff = emphOffset;
+
+  emphChildren.push(createToken(SyntaxKind.EMPHASIS_MARKER, text.slice(markerStart, markerStart + expectedLen), emphOff));
+  emphOff += expectedLen;
+
+  const innerText = text.slice(markerStart + expectedLen, closePos);
+  emphChildren.push(...parseInlines(innerText, emphOff));
+  emphOff += innerText.length;
+
+  emphChildren.push(createToken(SyntaxKind.EMPHASIS_MARKER, text.slice(closePos, closePos + expectedLen), emphOff));
+
+  const kind = strong ? SyntaxKind.STRONG_EMPHASIS : SyntaxKind.EMPHASIS;
+  return {
+    element: createNode(kind, emphChildren, emphOffset),
+    // Consume only expectedLen; extra markers become literal text via outer loop restart
+    newPos: closePos + expectedLen,
+  };
+}
+
+function tryParseLink(
+  text: string,
+  pos: number,
+  baseOffset: number,
+): InlineParseResult | null {
+  const linkStart = pos;
+  const closePos = findMatchingBracket(text, pos + 1);
+  if (closePos === -1 || text[closePos + 1] !== "(") return null;
+  const destEnd = findClosingParen(text, closePos + 2);
+  if (destEnd === -1) return null;
+
+  const linkOffset = baseOffset + linkStart;
+  const linkChildren: SyntaxElement[] = [];
+  let linkOff = linkOffset;
+
+  linkChildren.push(createToken(SyntaxKind.LINK_OPEN, "[", linkOff));
+  linkOff += 1;
+
+  const linkTextContent = text.slice(linkStart + 1, closePos);
+  linkChildren.push(createNode(SyntaxKind.LINK_TEXT, parseInlines(linkTextContent, linkOff), linkOff));
+  linkOff += linkTextContent.length;
+
+  linkChildren.push(createToken(SyntaxKind.LINK_CLOSE, "]", linkOff));
+  linkOff += 1;
+
+  linkChildren.push(createToken(SyntaxKind.LINK_DEST_OPEN, "(", linkOff));
+  linkOff += 1;
+
+  const destContent = text.slice(closePos + 2, destEnd);
+  const { tokens: destTokens, length: destLen } = parseDestinationTokens(destContent, linkOff);
+  linkChildren.push(...destTokens);
+  linkOff += destLen;
+
+  linkChildren.push(createToken(SyntaxKind.LINK_DEST_CLOSE, ")", linkOff));
+
+  return { element: createNode(SyntaxKind.LINK, linkChildren, linkOffset), newPos: destEnd + 1 };
+}
+
+function tryParseImage(
+  text: string,
+  pos: number,
+  baseOffset: number,
+): InlineParseResult | null {
+  const imgStart = pos;
+  const closePos = findMatchingBracket(text, pos + 2);
+  if (closePos === -1 || text[closePos + 1] !== "(") return null;
+  const destEnd = findClosingParen(text, closePos + 2);
+  if (destEnd === -1) return null;
+
+  const imgOffset = baseOffset + imgStart;
+  const imgChildren: SyntaxElement[] = [];
+  let imgOff = imgOffset;
+
+  imgChildren.push(createToken(SyntaxKind.IMAGE_OPEN, "![", imgOff));
+  imgOff += 2;
+
+  const altContent = text.slice(imgStart + 2, closePos);
+  imgChildren.push(createNode(SyntaxKind.IMAGE_ALT, parseInlines(altContent, imgOff), imgOff));
+  imgOff += altContent.length;
+
+  imgChildren.push(createToken(SyntaxKind.LINK_CLOSE, "]", imgOff));
+  imgOff += 1;
+
+  imgChildren.push(createToken(SyntaxKind.LINK_DEST_OPEN, "(", imgOff));
+  imgOff += 1;
+
+  const destContent = text.slice(closePos + 2, destEnd);
+  const { tokens: destTokens, length: destLen } = parseDestinationTokens(destContent, imgOff);
+  imgChildren.push(...destTokens);
+  imgOff += destLen;
+
+  imgChildren.push(createToken(SyntaxKind.LINK_DEST_CLOSE, ")", imgOff));
+
+  return { element: createNode(SyntaxKind.IMAGE, imgChildren, imgOffset), newPos: destEnd + 1 };
 }
 
 /**
@@ -267,6 +238,33 @@ export function parseInlineWithHardLineBreak(
   }
 
   return { inlines: parseInlines(lineText, baseOffset), hardLineBreak: null };
+}
+
+function parseDestinationTokens(
+  destContent: string,
+  offset: number,
+): { tokens: SyntaxElement[]; length: number } {
+  const tokens: SyntaxElement[] = [];
+  let len = 0;
+
+  if (destContent) {
+    const titleMatch = destContent.match(/^(.*?)( +"[^"]*"| +'[^']*'| +\([^)]*\))$/);
+    if (titleMatch) {
+      const dest = titleMatch[1];
+      const title = titleMatch[2];
+      if (dest) {
+        tokens.push(createToken(SyntaxKind.LINK_DESTINATION, dest, offset + len));
+        len += dest.length;
+      }
+      tokens.push(createToken(SyntaxKind.LINK_TITLE, title, offset + len));
+      len += title.length;
+    } else {
+      tokens.push(createToken(SyntaxKind.LINK_DESTINATION, destContent, offset + len));
+      len += destContent.length;
+    }
+  }
+
+  return { tokens, length: len };
 }
 
 function findClosingBackticks(text: string, start: number, openLen: number): number {
