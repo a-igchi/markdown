@@ -27,7 +27,12 @@ function App() {
         </div>
         {showSource && (
           <div className="pane">
-            <pre className="source-view">{value}</pre>
+            <textarea
+              className="source-view"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              spellCheck={false}
+            />
           </div>
         )}
       </div>

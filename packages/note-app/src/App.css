@@ -80,8 +80,14 @@ body {
 
 /* Raw markdown view */
 .source-view {
+  display: block;
+  width: 100%;
+  height: 100%;
   margin: 0;
   padding: 16px 24px;
+  border: none;
+  resize: none;
+  outline: none;
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 14px;
   line-height: 1.6;
