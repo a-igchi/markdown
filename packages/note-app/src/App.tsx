@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Editor } from "editor-cst";
 import { useLocalStorage } from "./hooks/useLocalStorage.js";
+import { SpeedDial } from "./components/SpeedDial.js";
 import "./App.css";
 
 const INITIAL_CONTENT = `# My Notes
@@ -20,16 +21,6 @@ function App() {
 
   return (
     <div className="app">
-      <div className="toolbar">
-        <span className="app-title">Note App</span>
-        <button
-          className={`toggle-btn${showSource ? " active" : ""}`}
-          onClick={() => setShowSource((s) => !s)}
-          aria-pressed={showSource}
-        >
-          Raw Markdown
-        </button>
-      </div>
       <div className="panes">
         <div className="pane">
           <Editor value={value} onChange={setValue} className="editor" />
@@ -40,6 +31,12 @@ function App() {
           </div>
         )}
       </div>
+      <SpeedDial
+        value={value}
+        onChange={setValue}
+        showSource={showSource}
+        onToggleSource={() => setShowSource((s) => !s)}
+      />
     </div>
   );
 }
