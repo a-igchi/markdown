@@ -2,6 +2,7 @@
   "private": true,
   "scripts": {
     "test": "pnpm -r run test",
+    "test:fuzz": "pnpm -r run test:fuzz",
     "build": "pnpm -r run build"
   }
 }

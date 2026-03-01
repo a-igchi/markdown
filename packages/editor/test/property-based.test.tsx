@@ -7,6 +7,7 @@ import {
 } from "../src/cursor/cursor.js";
 import { markdownDoc } from "./arbitraries.js";
 import { roundTrip, renderIntoContainer } from "./test-helpers.jsx";
+import { fcOptions } from "./fc-config.js";
 
 // --- Strip offset/length for structural AST comparison ---
 
@@ -30,7 +31,7 @@ describe("property-based: extractText round-trip", () => {
       fc.property(markdownDoc, (md) => {
         expect(roundTrip(md)).toBe(md);
       }),
-      { numRuns: 200 },
+      fcOptions({ numRuns: 200 }),
     );
   });
 });
@@ -53,7 +54,7 @@ describe("property-based: cursor save/restore", () => {
           expect(restored).toBe(offset);
         },
       ),
-      { numRuns: 200 },
+      fcOptions({ numRuns: 200 }),
     );
   });
 });
@@ -67,7 +68,7 @@ describe("property-based: parse idempotency", () => {
         const ast2 = parse(rt);
         expect(stripOffsets(ast2)).toEqual(stripOffsets(ast1));
       }),
-      { numRuns: 200 },
+      fcOptions({ numRuns: 200 }),
     );
   });
 });

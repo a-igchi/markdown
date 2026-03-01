@@ -10,6 +10,7 @@ import {
   orderedListBlock,
   headingBlock,
 } from "./arbitraries.js";
+import { fcOptions } from "./fc-config.js";
 
 // --- Types ---
 
@@ -253,7 +254,7 @@ describe("model-based: Editor operations", () => {
           }
         },
       ),
-      { numRuns: 100 },
+      fcOptions({ numRuns: 100 }),
     );
   });
 });
