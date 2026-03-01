@@ -15,6 +15,14 @@ import type { ReactNode } from "react";
  * CST tokens preserve all original text.
  */
 export function cstToReact(doc: SyntaxNode): ReactNode[] {
+  if (doc.children.length === 0) {
+    // Empty document: render a placeholder paragraph so the browser always has
+    // a React-managed block element to type into. Without this, typing into an
+    // empty contentEditable creates a browser-inserted text node that React
+    // doesn't track; when React then adds the parsed <p>, both coexist and
+    // extractText reads them both, causing text duplication.
+    return [<p key="placeholder" data-block="paragraph"><br /></p>];
+  }
   const result: ReactNode[] = [];
   for (let i = 0; i < doc.children.length; i++) {
     const child = doc.children[i];

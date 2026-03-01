@@ -58,7 +58,7 @@ describe("Editor component (CST)", () => {
     expect(onChange).toHaveBeenCalled();
   });
 
-  it("inserts soft break on Enter key", () => {
+  it("Enter on paragraph creates new block", () => {
     const onChange = vi.fn();
     const { container } = render(
       <Editor value="Hello" onChange={onChange} />,
@@ -70,8 +70,8 @@ describe("Editor component (CST)", () => {
 
     fireEvent.keyDown(editable, { key: "Enter" });
 
-    // Single Enter inserts \n (soft break), not \n\n
-    expect(onChange).toHaveBeenCalledWith("Hello\n");
+    // Single Enter inserts \n\n to create a new block
+    expect(onChange).toHaveBeenCalledWith("Hello\n\n");
   });
 
   it("updates rendering when value prop changes", () => {
@@ -251,7 +251,7 @@ describe("Editor component (CST)", () => {
       expect(onChange).toHaveBeenCalledWith("- ite\n- m1");
     });
 
-    it("Enter in non-list paragraph inserts plain newline", () => {
+    it("Enter in non-list paragraph creates new block", () => {
       const onChange = vi.fn();
       const { container } = render(
         <Editor value="Hello" onChange={onChange} />,
@@ -262,7 +262,7 @@ describe("Editor component (CST)", () => {
       setCursor(textNode, 5);
 
       fireEvent.keyDown(editable, { key: "Enter" });
-      expect(onChange).toHaveBeenCalledWith("Hello\n");
+      expect(onChange).toHaveBeenCalledWith("Hello\n\n");
     });
   });
 
@@ -343,30 +343,30 @@ describe("Editor component (CST)", () => {
       const p = editable.querySelector("p")!;
       setCursor(p.firstChild!, 5);
 
-      // Press Enter → inserts \n between "Hello" and blank line
+      // Press Enter → inserts \n\n between "Hello" and existing blank line
       fireEvent.keyDown(editable, { key: "Enter" });
       expect(onChange).toHaveBeenCalledTimes(1);
       const afterEnter = onChange.mock.calls[0][0];
-      expect(afterEnter).toBe("Hello\n\n\nWorld");
+      expect(afterEnter).toBe("Hello\n\n\n\nWorld");
 
       // Re-render with new value
       onChange.mockClear();
       rerender(<Editor value={afterEnter} onChange={onChange} />);
 
-      // After re-render, cursor should be on the blank line.
-      // Simulate typing 'a' into the blank_line div:
+      // After re-render, cursor should be on the second blank line.
+      // Simulate typing 'a' into that blank_line div:
       const blankLines = editable.querySelectorAll(
         "[data-block='blank_line']",
       );
-      // "Hello\n\n\nWorld" → p "Hello", blank_line, blank_line, p "World"
-      // Cursor should be at first blank_line (index 0)
-      const target = blankLines[0];
+      // "Hello\n\n\n\nWorld" → p "Hello", blank_line, blank_line, blank_line, p "World"
+      // Cursor (offset 7) is at second blank_line (index 1)
+      const target = blankLines[1];
       target.innerHTML = "a";
       setCursor(target.firstChild!, 1);
 
       fireEvent.input(editable);
       expect(onChange).toHaveBeenCalledTimes(1);
-      expect(onChange.mock.calls[0][0]).toBe("Hello\n\na\n\nWorld");
+      expect(onChange.mock.calls[0][0]).toBe("Hello\n\n\na\n\nWorld");
     });
 
     it("Enter at end of document, then type a character", () => {
@@ -380,31 +380,29 @@ describe("Editor component (CST)", () => {
       const p = editable.querySelector("p")!;
       setCursor(p.firstChild!, 5);
 
-      // Press Enter
+      // Press Enter → inserts \n\n creating a blank line after "Hello"
       fireEvent.keyDown(editable, { key: "Enter" });
       expect(onChange).toHaveBeenCalledTimes(1);
       const afterEnter = onChange.mock.calls[0][0];
-      expect(afterEnter).toBe("Hello\n");
+      expect(afterEnter).toBe("Hello\n\n");
 
-      // Re-render with "Hello\n"
-      // parse("Hello\n") → single paragraph, renders as <p>Hello</p>
-      // extractText → "Hello" (trailing \n stripped)
-      // Cursor offset 6 should be clamped to end of document
+      // Re-render with "Hello\n\n"
+      // parse("Hello\n\n") → PARAGRAPH + BLANK_LINE, renders as <p>Hello</p><div blank_line><br/></div>
+      // Cursor offset 7 clamps to blank_line
       onChange.mockClear();
       rerender(<Editor value={afterEnter} onChange={onChange} />);
 
-      // Simulate typing 'a' at end of "Hello"
-      // (cursor should have been restored to end of paragraph)
-      const textNode = editable.querySelector("p")!.firstChild!;
-      textNode.textContent = "Helloa";
-      setCursor(textNode, 6);
+      // Simulate typing 'a' into the blank_line (the new block after "Hello")
+      const blankLine = editable.querySelector("[data-block='blank_line']")!;
+      blankLine.innerHTML = "a";
+      setCursor(blankLine.firstChild!, 1);
 
       fireEvent.input(editable);
       expect(onChange).toHaveBeenCalledTimes(1);
-      expect(onChange.mock.calls[0][0]).toBe("Helloa");
+      expect(onChange.mock.calls[0][0]).toBe("Hello\n\na");
     });
 
-    it("two Enters create a blank line, then typing creates a new paragraph", () => {
+    it("one Enter creates a blank line, then typing creates a new paragraph", () => {
       const onChange = vi.fn();
       const { container, rerender } = render(
         <Editor value="Hello" onChange={onChange} />,
@@ -415,34 +413,21 @@ describe("Editor component (CST)", () => {
       const p = editable.querySelector("p")!;
       setCursor(p.firstChild!, 5);
 
-      // First Enter
+      // One Enter creates \n\n → blank line immediately
       fireEvent.keyDown(editable, { key: "Enter" });
       const afterFirst = onChange.mock.calls[0][0];
-      expect(afterFirst).toBe("Hello\n");
-
-      // Re-render
-      onChange.mockClear();
-      rerender(<Editor value={afterFirst} onChange={onChange} />);
-
-      // "Hello\n" renders as <p>Hello</p>, cursor at end
-      // Second Enter at offset 5 (end of "Hello")
-      const textNode2 = editable.querySelector("p")!.firstChild!;
-      setCursor(textNode2, 5);
-
-      fireEvent.keyDown(editable, { key: "Enter" });
-      const afterSecond = onChange.mock.calls[0][0];
-      expect(afterSecond).toBe("Hello\n\n");
+      expect(afterFirst).toBe("Hello\n\n");
 
       // Re-render with "Hello\n\n"
       // parse("Hello\n\n") → PARAGRAPH + BLANK_LINE
       onChange.mockClear();
-      rerender(<Editor value={afterSecond} onChange={onChange} />);
+      rerender(<Editor value={afterFirst} onChange={onChange} />);
 
-      // Now there should be a blank_line div to type into
+      // A blank_line div should exist immediately after one Enter
       const blankLine = editable.querySelector("[data-block='blank_line']");
       expect(blankLine).not.toBeNull();
 
-      // Simulate typing 'a' into the blank line
+      // Simulate typing 'a' into the blank line → creates a new paragraph
       blankLine!.innerHTML = "a";
       setCursor(blankLine!.firstChild!, 1);
 
@@ -660,7 +645,7 @@ describe("Editor component (CST)", () => {
       }
     });
 
-    it("Enter mid-paragraph creates soft break, typing continues on new line", () => {
+    it("Enter mid-paragraph splits into two paragraphs", () => {
       const onChange = vi.fn();
       const { container, rerender } = render(
         <Editor value="HelloWorld" onChange={onChange} />,
@@ -671,26 +656,29 @@ describe("Editor component (CST)", () => {
       const textNode = editable.querySelector("p")!.firstChild!;
       setCursor(textNode, 5);
 
-      // Press Enter
+      // Press Enter → splits into two paragraphs
       fireEvent.keyDown(editable, { key: "Enter" });
       const afterEnter = onChange.mock.calls[0][0];
-      expect(afterEnter).toBe("Hello\nWorld");
+      expect(afterEnter).toBe("Hello\n\nWorld");
 
-      // Re-render: "Hello\nWorld" is a single paragraph with soft break
+      // Re-render: "Hello\n\nWorld" → two separate paragraphs
       onChange.mockClear();
       rerender(<Editor value={afterEnter} onChange={onChange} />);
 
-      // The paragraph renders as <p>Hello\nWorld</p> (single text node)
-      const pText = editable.querySelector("p")!.firstChild!;
-      expect(pText.textContent).toBe("Hello\nWorld");
+      // Two <p> elements
+      const paragraphs = editable.querySelectorAll("p[data-block='paragraph']");
+      expect(paragraphs.length).toBe(2);
+      expect(paragraphs[0].firstChild!.textContent).toBe("Hello");
 
-      // Simulate typing 'a' after "Hello\n" (at offset 6)
-      pText.textContent = "Hello\naWorld";
-      setCursor(pText, 7); // after the 'a'
+      // Cursor is at start of second paragraph (offset 7 → "World" text node offset 0)
+      // Simulate typing 'a' before "World"
+      const worldText = paragraphs[1].firstChild!;
+      worldText.textContent = "aWorld";
+      setCursor(worldText, 1);
 
       fireEvent.input(editable);
       expect(onChange).toHaveBeenCalledTimes(1);
-      expect(onChange.mock.calls[0][0]).toBe("Hello\naWorld");
+      expect(onChange.mock.calls[0][0]).toBe("Hello\n\naWorld");
     });
   });
 });

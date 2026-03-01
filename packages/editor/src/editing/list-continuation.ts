@@ -23,6 +23,6 @@ export function getListContinuation(
     return { insertion: "\n" + marker, cursorOffset: offset + 1 + marker.length };
   }
 
-  // Not a list → plain newline
-  return { insertion: "\n", cursorOffset: offset + 1 };
+  // Not a list → double newline to create a new block
+  return { insertion: "\n\n", cursorOffset: offset + 2 };
 }

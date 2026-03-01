@@ -56,23 +56,23 @@ describe("getListContinuation", () => {
     expect(insertion).toBe("\n  - ");
   });
 
-  it("returns plain newline for paragraph", () => {
+  it("creates new block (double newline) for paragraph", () => {
     const value = "Hello";
     const { insertion, cursorOffset } = getListContinuation(value, value.length);
-    expect(insertion).toBe("\n");
-    expect(cursorOffset).toBe(value.length + 1);
+    expect(insertion).toBe("\n\n");
+    expect(cursorOffset).toBe(value.length + 2);
   });
 
-  it("returns plain newline for heading", () => {
+  it("creates new block (double newline) for heading", () => {
     const value = "# Title";
     const { insertion, cursorOffset } = getListContinuation(value, value.length);
-    expect(insertion).toBe("\n");
-    expect(cursorOffset).toBe(value.length + 1);
+    expect(insertion).toBe("\n\n");
+    expect(cursorOffset).toBe(value.length + 2);
   });
 
-  it("returns plain newline for empty document", () => {
+  it("creates new block (double newline) for empty document", () => {
     const { insertion, cursorOffset } = getListContinuation("", 0);
-    expect(insertion).toBe("\n");
-    expect(cursorOffset).toBe(1);
+    expect(insertion).toBe("\n\n");
+    expect(cursorOffset).toBe(2);
   });
 });

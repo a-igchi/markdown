@@ -84,6 +84,42 @@ function typeCharAtCursor(editable: HTMLElement, char: string): void {
   fireEvent.input(editable);
 }
 
+describe("typing bug: typing into empty editor (after clear) causes text duplication", () => {
+  it("typing abcd into empty editor produces 'abcd' without duplication", () => {
+    let currentValue = "";
+    const onChange = vi.fn((v: string) => {
+      currentValue = v;
+    });
+
+    const { container, rerender } = render(
+      <Editor value={currentValue} onChange={onChange} />,
+    );
+    const editable = container.querySelector("[contenteditable]")! as HTMLElement;
+
+    // Place cursor at whatever is available in the editor.
+    // After fix: a placeholder <p> exists, cursor goes inside it.
+    // Before fix: editable is empty, cursor lands on the div itself (simulates bug).
+    const placeholder = editable.querySelector('[data-block="paragraph"]') as HTMLElement | null;
+    if (placeholder) {
+      setCursor(placeholder, 0);
+    } else {
+      setCursor(editable, 0);
+    }
+
+    const chars = ["a", "b", "c", "d"];
+    for (const char of chars) {
+      onChange.mockClear();
+      typeCharAtCursor(editable, char);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      currentValue = onChange.mock.calls[0][0];
+      onChange.mockClear();
+      rerender(<Editor value={currentValue} onChange={onChange} />);
+    }
+
+    expect(currentValue).toBe("abcd");
+  });
+});
+
 describe("typing bug: extra text inserted after Enter + type", () => {
   it("typing 'hoge' after inserting blank line produces no extra text", () => {
     let currentValue = INITIAL_MARKDOWN;
