@@ -25,11 +25,13 @@ function App() {
     <div className="app">
       <h1 className="app-title">Markdown WYSIWYG Editor (CST)</h1>
       <div className="editor-container">
-        <Editor value={value} onChange={setValue} className="editor" />
+        <div data-testid="editor-wrapper">
+          <Editor value={value} onChange={setValue} className="editor" />
+        </div>
       </div>
-      <details className="raw-section">
+      <details className="raw-section" data-testid="raw-section">
         <summary>Raw Markdown</summary>
-        <pre className="raw-source">{value}</pre>
+        <pre className="raw-source" data-testid="raw-markdown">{value}</pre>
       </details>
     </div>
   );

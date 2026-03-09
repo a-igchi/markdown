@@ -31,7 +31,7 @@ export function cstToReact(doc: SyntaxNode): ReactNode[] {
   return result;
 }
 
-function renderElement(element: SyntaxElement, key: string): ReactNode {
+export function renderElement(element: SyntaxElement, key: string): ReactNode {
   if (isToken(element)) {
     if (element.kind === SyntaxKind.BLANK_LINE) {
       return (

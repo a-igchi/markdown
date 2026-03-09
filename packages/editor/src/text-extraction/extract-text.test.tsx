@@ -103,4 +103,37 @@ describe("extractText (CST round-trip)", () => {
       expect(extractText(container)).toBe("");
     });
   });
+
+  describe("non-placeholder <br>", () => {
+    it("emits \\n for a non-placeholder <br> inside a paragraph with other content", () => {
+      const container = document.createElement("div");
+      // <br> is NOT sole child of <p>, so it's not a placeholder
+      container.innerHTML = '<p data-block="paragraph">text<br>more</p>';
+      expect(extractText(container)).toBe("text\nmore");
+    });
+  });
+
+  describe("blank_line with content", () => {
+    it("emits \\n + content + \\n for a blank_line div with text", () => {
+      const container = document.createElement("div");
+      // blank_line that has user-typed content
+      container.innerHTML =
+        '<p data-block="paragraph">above</p>' +
+        '<div data-block="blank_line">typed</div>' +
+        '<p data-block="paragraph">below</p>';
+      const text = extractText(container);
+      // "above\n" + "\n" + "typed" + "\n" + "below\n" → trim trailing \n → "above\n\ntypedbelow"
+      // Actually: above\n + \n(blank_line separator) + typed + \n(leaf_block_end blank_line) + below\n → trim → "above\n\ntyped\nbelow"
+      expect(text).toBe("above\n\ntyped\nbelow");
+    });
+  });
+
+  describe("browser-generated raw div (no data-block)", () => {
+    it("emits content + \\n for a raw <div> element", () => {
+      const container = document.createElement("div");
+      // Raw div without data-block (browser-generated)
+      container.innerHTML = "<div>browser div</div>";
+      expect(extractText(container)).toBe("browser div");
+    });
+  });
 });

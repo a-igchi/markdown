@@ -3,6 +3,10 @@
   "scripts": {
     "test": "pnpm -r run test",
     "test:fuzz": "pnpm -r run test:fuzz",
+    "test:e2e": "playwright test",
     "build": "pnpm -r run build"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
   }
 }

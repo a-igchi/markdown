@@ -14,6 +14,7 @@ This repository is a monorepo for handling markdown.
 - `parser`: Markdown parser
 - `editor`: Markdown WYSIWYG editor
 - `sample-app`: Sample application using the parser and editor
+- `note-app`: Note-taking application using the parser and editor
 
 ## Commands
 

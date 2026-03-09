@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import * as fc from "fast-check";
 import { parse } from "parser-cst";
+import { render } from "@testing-library/react";
+import { cstToModel } from "../src/model/cst-to-model.js";
+import { modelToMarkdown } from "../src/model/model-to-markdown.js";
+import { modelToReact } from "../src/model/model-to-react.js";
 import {
-  saveCursorAsOffset,
-  restoreCursorFromOffset,
-} from "../src/cursor/cursor.js";
+  saveDomCursorAsModelCursor,
+  restoreModelCursorToDom,
+} from "../src/model/cursor-mapping.js";
+import type { ModelCursor } from "../src/model/types.js";
 import { markdownDoc } from "./arbitraries.js";
-import { roundTrip, renderIntoContainer } from "./test-helpers.jsx";
+import { roundTrip } from "./test-helpers.jsx";
 import { fcOptions } from "./fc-config.js";
 
 // --- Strip offset/length for structural AST comparison ---
@@ -41,19 +46,32 @@ describe("property-based: cursor save/restore", () => {
     window.getSelection()?.removeAllRanges();
   });
 
-  it("restoring then saving cursor offset is identity", () => {
+  const docWithCursorArb = markdownDoc
+    .filter((s) => s.length > 0)
+    .map((md) => cstToModel(parse(md)))
+    .filter((doc) => doc.blocks.length > 0)
+    .chain((doc) =>
+      fc.integer({ min: 0, max: doc.blocks.length - 1 }).chain((blockIndex) => {
+        const block = doc.blocks[blockIndex];
+        const maxOffset = block.type === "blank_line" ? 0 : block.content.length;
+        return fc
+          .integer({ min: 0, max: maxOffset })
+          .map((offset) => ({ doc, cursor: { blockIndex, offset } as ModelCursor }));
+      }),
+    );
+
+  it("restoring then saving model cursor is identity", () => {
     fc.assert(
-      fc.property(
-        markdownDoc.filter((s) => s.length > 0),
-        fc.nat(),
-        (md, rawOffset) => {
-          const offset = rawOffset % (md.length + 1);
-          const el = renderIntoContainer(md);
-          restoreCursorFromOffset(el, offset);
-          const restored = saveCursorAsOffset(el);
-          expect(restored).toBe(offset);
-        },
-      ),
+      fc.property(docWithCursorArb, ({ doc, cursor }) => {
+        const elements = modelToReact(doc);
+        const { container } = render(
+          <div contentEditable suppressContentEditableWarning>{elements}</div>,
+        );
+        const el = container.firstElementChild as HTMLElement;
+        restoreModelCursorToDom(el, cursor);
+        const restored = saveDomCursorAsModelCursor(el);
+        expect(restored).toEqual(cursor);
+      }),
       fcOptions({ numRuns: 200 }),
     );
   });
@@ -67,6 +85,17 @@ describe("property-based: parse idempotency", () => {
         const rt = roundTrip(md);
         const ast2 = parse(rt);
         expect(stripOffsets(ast2)).toEqual(stripOffsets(ast1));
+      }),
+      fcOptions({ numRuns: 200 }),
+    );
+  });
+});
+
+describe("property-based: model roundtrip", () => {
+  it("modelToMarkdown(cstToModel(parse(md))) === md for generated markdown", () => {
+    fc.assert(
+      fc.property(markdownDoc, (md) => {
+        expect(modelToMarkdown(cstToModel(parse(md)))).toBe(md);
       }),
       fcOptions({ numRuns: 200 }),
     );

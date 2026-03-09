@@ -295,4 +295,78 @@ describe("cstToReact", () => {
       expect(el.querySelector("ol")).not.toBeNull();
     });
   });
+
+  describe("list item NEWLINE token (multi-line item continuation)", () => {
+    it("renders a list item with a continuation line (may emit NEWLINE token)", () => {
+      // "- line1\n  continuation" → single list item with continuation
+      // Parser may emit NEWLINE token between lines inside the list item
+      const source = "- line1\n  continuation";
+      const el = renderMarkdown(source);
+      const items = el.querySelectorAll("[data-block='list_item']");
+      expect(items.length).toBeGreaterThan(0);
+      expect(items[0].textContent).toContain("line1");
+      expect(items[0].textContent).toContain("continuation");
+    });
+
+    it("renders tight list with multiple items (each item ends with newline)", () => {
+      // Each tight list item may have trailing NEWLINE token in its children
+      const source = "- alpha\n- beta\n- gamma";
+      const el = renderMarkdown(source);
+      const items = el.querySelectorAll("[data-block='list_item']");
+      expect(items.length).toBe(3);
+    });
+
+    it("renders list item with empty marker content (NEWLINE token as direct LIST_ITEM child)", () => {
+      // "- \n- second" → first item has no content → parser emits NEWLINE token
+      // directly in LIST_ITEM children (not wrapped in PARAGRAPH)
+      const source = "- \n- second";
+      const el = renderMarkdown(source);
+      // Should render without crashing; first item has blank content
+      expect(el.querySelector("ul")).not.toBeNull();
+    });
+  });
+
+  describe("list item PARAGRAPH child (loose list multiline)", () => {
+    it("renders loose list where items contain multi-line paragraph content", () => {
+      // Loose list: each item has blank line separation → parser puts PARAGRAPH nodes inside LIST_ITEM
+      const source = "- First item\n\n- Second item";
+      const el = renderMarkdown(source);
+      const items = el.querySelectorAll("[data-block='list_item']");
+      expect(items.length).toBe(2);
+      expect(items[0].textContent).toContain("First item");
+      expect(items[1].textContent).toContain("Second item");
+    });
+
+    it("renders loose ordered list with PARAGRAPH nodes in list items", () => {
+      const source = "1. First\n\n2. Second";
+      const el = renderMarkdown(source);
+      const items = el.querySelectorAll("[data-block='list_item']");
+      expect(items.length).toBe(2);
+      expect(items[0].textContent).toContain("First");
+      expect(items[1].textContent).toContain("Second");
+    });
+  });
+
+  describe("list item with unusual child node type (getText fallback)", () => {
+    it("renders list item that contains a blockquote child (else/getText fallback)", () => {
+      // "- item\n    > blockquote" (no blank line, 4-space indent) →
+      // LIST_ITEM children: MARKER, PARAGRAPH, BLOCK_QUOTE
+      // BLOCK_QUOTE is not LIST or PARAGRAPH → else branch (lines 350-351)
+      const source = "- item\n    > blockquote";
+      const el = renderMarkdown(source);
+      expect(el.querySelector("ul")).not.toBeNull();
+      const li = el.querySelector("li");
+      expect(li).not.toBeNull();
+      // The blockquote content should appear via getText fallback
+      expect(li!.textContent).toContain("blockquote");
+    });
+
+    it("renders list item that contains a fenced code block child", () => {
+      const source = "- item\n\n  ```\n  code\n  ```";
+      const el = renderMarkdown(source);
+      expect(el.querySelector("ul")).not.toBeNull();
+      const li = el.querySelector("li");
+      expect(li).not.toBeNull();
+    });
+  });
 });
